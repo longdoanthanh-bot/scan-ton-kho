@@ -168,18 +168,18 @@ function rebuildTotalsAndSummary() {
 }
 
 function ensureSheetsExist(ss) {
-  // 1. Trang Chi_Tiet_Scan — tận dụng luôn tab đầu tiên (gid=0) nếu đang trống để link ?gid=0#gid=0 mở thẳng ra bảng số liệu!
+  // 1. Trang Chi_Tiet_Scan — tận dụng luôn tab đầu tiên (gid=0 / Sheet1) để link ?gid=0#gid=0 mở thẳng ra bảng số liệu!
   let shDetail = ss.getSheetByName(SHEET_CHI_TIET);
   if (!shDetail) {
     const sheets = ss.getSheets();
-    if (sheets.length > 0 && sheets[0].getLastRow() === 0) {
+    if (sheets.length > 0 && sheets[0].getLastRow() <= 1) {
       shDetail = sheets[0];
       shDetail.setName(SHEET_CHI_TIET);
     } else {
       shDetail = ss.insertSheet(SHEET_CHI_TIET, 0);
     }
   }
-  if (shDetail.getLastRow() === 0) {
+  if (shDetail.getLastRow() === 0 || shDetail.getLastColumn() < 9) {
     const headers = [[
       'Ngày giờ scan',
       'Tên sản phẩm',
