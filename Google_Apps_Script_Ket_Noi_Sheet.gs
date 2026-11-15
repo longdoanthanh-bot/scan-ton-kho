@@ -16,9 +16,18 @@
  * ============================================================================
  */
 
+const TARGET_SPREADSHEET_ID = '1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk';
 const SHEET_CHI_TIET = 'Chi_Tiet_Scan';
 const SHEET_TONG_HOP = 'Tong_Hop_Ton';
 const SHEET_DANH_MUC = 'Danh_Muc_SP';
+
+function getTargetSpreadsheet() {
+  try {
+    const active = SpreadsheetApp.getActiveSpreadsheet();
+    if (active) return active;
+  } catch (e) {}
+  return SpreadsheetApp.openById(TARGET_SPREADSHEET_ID);
+}
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -31,7 +40,7 @@ function onOpen() {
 function doGet(e) {
   try {
     const action = (e && e.parameter && e.parameter.action) ? String(e.parameter.action) : 'status';
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getTargetSpreadsheet();
     ensureSheetsExist(ss);
 
     if (action === 'ping') {
@@ -84,7 +93,7 @@ function doPost(e) {
     const rawBody = (e && e.postData && e.postData.contents) ? e.postData.contents : '{}';
     const payload = JSON.parse(rawBody);
     const action = String(payload.action || '');
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getTargetSpreadsheet();
     ensureSheetsExist(ss);
 
     if (action === 'ping') {
@@ -147,22 +156,28 @@ function doPost(e) {
 }
 
 function initAllSheets() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getTargetSpreadsheet();
   ensureSheetsExist(ss);
   rebuildTotalsAndSummaryInternal(ss);
 }
 
 function rebuildTotalsAndSummary() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getTargetSpreadsheet();
   ensureSheetsExist(ss);
   rebuildTotalsAndSummaryInternal(ss);
 }
 
 function ensureSheetsExist(ss) {
-  // 1. Trang Chi_Tiet_Scan (Đúng 7 cột chính người dùng yêu cầu + 2 cột phụ trợ đồng bộ sửa/xóa)
+  // 1. Trang Chi_Tiet_Scan — tận dụng luôn tab đầu tiên (gid=0) nếu đang trống để link ?gid=0#gid=0 mở thẳng ra bảng số liệu!
   let shDetail = ss.getSheetByName(SHEET_CHI_TIET);
   if (!shDetail) {
-    shDetail = ss.insertSheet(SHEET_CHI_TIET, 0);
+    const sheets = ss.getSheets();
+    if (sheets.length > 0 && sheets[0].getLastRow() === 0) {
+      shDetail = sheets[0];
+      shDetail.setName(SHEET_CHI_TIET);
+    } else {
+      shDetail = ss.insertSheet(SHEET_CHI_TIET, 0);
+    }
   }
   if (shDetail.getLastRow() === 0) {
     const headers = [[
@@ -554,7 +569,7 @@ function jsonResponse(obj) {
 
 // Các hàm gọi trực tiếp từ giao diện Web App nhúng trên Google (google.script.run)
 function clientPullData() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getTargetSpreadsheet();
   ensureSheetsExist(ss);
   return {
     ok: true,
@@ -568,7 +583,7 @@ function clientPushOps(ops) {
   const lock = LockService.getScriptLock();
   lock.waitLock(25000);
   try {
-    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const ss = getTargetSpreadsheet();
     ensureSheetsExist(ss);
     applyOperations(ss, ops);
     const summary = rebuildTotalsAndSummaryInternal(ss);

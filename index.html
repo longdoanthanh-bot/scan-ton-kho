@@ -10,7 +10,7 @@
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=5">
+  <link rel="stylesheet" href="./styles.css?v=6">
 </head>
 <body>
 
@@ -375,16 +375,16 @@
       <h3 class="modal-title">📊 Kết Nối Tự Động Với Google Sheet</h3>
 
       <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
-        <div style="font-weight:800;color:#0369a1;margin-bottom:4px;">Hướng dẫn gắn vào Google Sheet mới (chỉ làm 1 lần):</div>
+        <div style="font-weight:800;color:#0369a1;margin-bottom:4px;">Hướng dẫn mở cổng nhận dữ liệu cho file Google Sheet của bạn (chỉ làm 1 lần):</div>
         <ol class="step-list">
-          <li>Mở một file Google Sheet trắng mới (gõ <strong>sheets.new</strong> trên máy tính).</li>
-          <li>Bấm nút bên dưới để sao chép sẵn đoạn mã tự động tạo bảng.</li>
-          <li>Trên Google Sheet, vào menu <strong>Tiện ích mở rộng (Extensions) → Apps Script</strong>, xóa chữ mặc định và <strong>Dán (Ctrl+V)</strong> mã vừa chép vào → bấm Lưu.</li>
-          <li>Bấm nút xanh <strong>Triển khai (Deploy) → Tùy chọn triển khai mới → Ứng dụng web (Web app)</strong>.</li>
-          <li>Mục <em>Ai có quyền truy cập</em> chọn <strong>Bất kỳ ai (Anyone)</strong> → Bấm <strong>Triển khai</strong> → Sao chép đường link (có đuôi <code>/exec</code>) dán vào ô bên dưới!</li>
+          <li>Bấm nút xanh đậm bên dưới để sao chép sẵn đoạn mã (đã gán cứng vào đúng file Sheet của bạn).</li>
+          <li>Trên file Google Sheet của bạn, vào menu trên cùng: <strong>Tiện ích mở rộng (Extensions) → Apps Script</strong>, xóa chữ mặc định có sẵn rồi <strong>Dán (Ctrl+V)</strong> mã vào → bấm biểu tượng đĩa mềm <strong>Lưu (Ctrl+S)</strong>.</li>
+          <li>Bấm nút xanh góc trên phải: <strong>Triển khai (Deploy) → Tùy chọn triển khai mới → biểu tượng bánh răng Chọn loại → Ứng dụng web (Web app)</strong>.</li>
+          <li>Mục <em>Ai có quyền truy cập</em> chọn <strong>Bất kỳ ai (Anyone)</strong> → bấm <strong>Triển khai</strong>.</li>
+          <li><strong>Lưu ý bước cấp quyền Google:</strong> Bấm <strong>Ủy quyền truy cập</strong> → chọn tài khoản Gmail → bấm chữ nhỏ <strong>Nâng cao (Advanced)</strong> ở góc trái dưới → bấm <strong>Đi tới Dự án... (không an toàn)</strong> → bấm <strong>Cho phép (Allow)</strong> → chép đường link có đuôi <code>/exec</code> dán vào ô dưới!</li>
         </ol>
         <button type="button" id="btnCopyAppsScript" class="btn btn-navy" style="width:100%;">
-          📋 Bước 1: Sao chép Mã Kết Nối Google Sheet
+          📋 Bước 1: Sao chép Mã Kết Nối Đã Gán Sẵn Sheet Của Bạn
         </button>
       </div>
 
@@ -424,9 +424,9 @@
   </div>
 
   <!-- Bộ giải mã C++ WebAssembly siêu tốc nạp cục bộ (hoạt động cả khi mất mạng) -->
-  <script src="./vendor/zxing_wasm_reader.js?v=5"></script>
-  <script src="./catalog.js?v=5"></script>
-  <script src="./apps_script_embed.js?v=5"></script>
-  <script src="./app.js?v=5"></script>
+  <script src="./vendor/zxing_wasm_reader.js?v=6"></script>
+  <script src="./catalog.js?v=6"></script>
+  <script src="./apps_script_embed.js?v=6"></script>
+  <script src="./app.js?v=6"></script>
 </body>
 </html>

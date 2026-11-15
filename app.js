@@ -27,7 +27,7 @@
   let pendingOps = [];
   let settings = {
     sheetWebAppUrl: '',
-    sheetViewUrl: '',
+    sheetViewUrl: 'https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0',
     soundEnabled: true,
     duplicateAskSec: 4,
     scalePrefixOnly: true
@@ -157,7 +157,7 @@
     renderAll();
 
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-      navigator.serviceWorker.register('./sw.js?v=5').catch(function () {});
+      navigator.serviceWorker.register('./sw.js?v=6').catch(function () {});
     }
 
     window.addEventListener('online', function () {
@@ -2182,8 +2182,21 @@
     document.getElementById('btnSaveSheetUrl').addEventListener('click', async function () {
       const urlVal = String(document.getElementById('sheetWebAppUrlInput').value || '').trim();
       const viewVal = String(document.getElementById('sheetViewUrlInput').value || '').trim();
+
+      if (urlVal.indexOf('docs.google.com/spreadsheets/') !== -1) {
+        document.getElementById('sheetViewUrlInput').value = urlVal;
+        document.getElementById('sheetWebAppUrlInput').value = '';
+        settings.sheetViewUrl = urlVal;
+        saveSettings();
+        alert(
+          'Đường link "docs.google.com/spreadsheets/..." bạn vừa dán là link MỞ XEM bảng tính (hệ thống đã tự lưu vào ô Link mở xem bên dưới).\n\n' +
+          'Để Google cho phép tự động ghi dữ liệu quét vào bảng tính này, bạn cần dán đường link có đuôi "/exec" (bắt đầu bằng https://script.google.com/macros/s/.../exec) tạo từ menu Tiện ích mở rộng -> Apps Script!'
+        );
+        return;
+      }
+
       settings.sheetWebAppUrl = urlVal;
-      settings.sheetViewUrl = viewVal;
+      if (viewVal) settings.sheetViewUrl = viewVal;
       saveSettings();
       closeModal('sheetModal');
       if (urlVal) {
@@ -2256,7 +2269,7 @@
     const inp = document.getElementById('sheetWebAppUrlInput');
     if (!box || !inp) return;
     const val = String(inp.value || '').trim();
-    box.style.display = (val.indexOf('https://script.google.com/') === 0 || val.indexOf('http') === 0) ? 'block' : 'none';
+    box.style.display = (val.indexOf('https://script.google.com/') === 0 || val.indexOf('http://127.0.0.1:') === 0) ? 'block' : 'none';
   }
 
   function openSheetModalUI() {
