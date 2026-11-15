@@ -1,4 +1,4 @@
-const CACHE_NAME = 'scan-ton-kho-v8';
+const CACHE_NAME = 'scan-ton-kho-v9';
 const ASSETS = [
   './',
   './index.html',
@@ -26,6 +26,12 @@ self.addEventListener('install', function (event) {
   self.skipWaiting();
 });
 
+self.addEventListener('message', function (event) {
+  if (event && event.data === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+
 self.addEventListener('activate', function (event) {
   event.waitUntil(
     caches.keys().then(function (keys) {
@@ -33,12 +39,13 @@ self.addEventListener('activate', function (event) {
         keys.filter(function (k) { return k !== CACHE_NAME; })
             .map(function (k) { return caches.delete(k); })
       );
+    }).then(function () {
+      return self.clients.claim();
     })
   );
-  self.clients.claim();
 });
 
-function fetchWithTimeout(request, timeoutMs) {
+function fetchFreshWithTimeout(request, timeoutMs) {
   return new Promise(function (resolve, reject) {
     var done = false;
     var timer = setTimeout(function () {
@@ -48,7 +55,7 @@ function fetchWithTimeout(request, timeoutMs) {
       }
     }, timeoutMs);
 
-    fetch(request).then(function (resp) {
+    fetch(request, { cache: 'no-cache' }).then(function (resp) {
       if (!done) {
         done = true;
         clearTimeout(timer);
@@ -96,11 +103,11 @@ self.addEventListener('fetch', function (event) {
     return;
   }
 
-  // Các tệp giao diện & danh mục 120 mã hàng:
-  // Có mạng nhanh (< 2.5 giây) -> lấy bản mới nhất và cập nhật bộ nhớ máy;
-  // Mất mạng hoặc sóng kho lạnh yếu -> mở ngay lập tức từ bộ nhớ Offline!
+  // Các tệp giao diện & mã nguồn chính:
+  // Có mạng -> kiểm tra thẳng máy chủ ({ cache: 'no-cache' }) để luôn nhận bản mới nhất tức thì;
+  // Mất mạng hoặc sóng yếu -> mở ngay lập tức từ bộ nhớ Offline!
   event.respondWith(
-    fetchWithTimeout(event.request, 2500).then(function (netResp) {
+    fetchFreshWithTimeout(event.request, 2800).then(function (netResp) {
       if (netResp && netResp.ok && url.indexOf(self.location.origin) === 0) {
         var clone = netResp.clone();
         caches.open(CACHE_NAME).then(function (cache) {

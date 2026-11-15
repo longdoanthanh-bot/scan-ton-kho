@@ -419,11 +419,11 @@ html, body {
   to { transform: translateY(0) scale(1); opacity: 1; }
 }
 
-/* Enlarged 3x Barcode Aiming Reticle + Camera Shutter Button */
+/* Enlarged 3x Full-Label Aiming Reticle (Barcode + NSX/HSD) + Camera Shutter Button */
 .barcode-aim-overlay {
   position: absolute;
   inset: 0;
-  padding: 76px 0 136px 0;
+  padding: 68px 0 128px 0;
   pointer-events: none;
   display: flex;
   flex-direction: column;
@@ -434,12 +434,44 @@ html, body {
 .barcode-aim-box {
   width: 94%;
   max-width: 680px;
-  height: 258px;
-  border: 3px dashed rgba(255, 255, 255, 0.88);
+  height: 360px;
+  border: 3px dashed rgba(255, 255, 255, 0.9);
   border-radius: 16px;
-  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.38);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.36);
   position: relative;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.aim-zone-top {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.85);
+}
+
+.aim-zone-divider {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 58%;
+  border-top: 1.5px dashed rgba(125, 211, 252, 0.55);
+}
+
+.aim-zone-bottom {
+  position: absolute;
+  bottom: 9px;
+  left: 12px;
+  right: 12px;
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #bae6fd;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
 }
 
 .camera-viewport.is-scanning .barcode-aim-box {
@@ -456,7 +488,7 @@ html, body {
   position: absolute;
   left: 10px;
   right: 10px;
-  top: 50%;
+  top: 32%;
   height: 3px;
   background: #ef4444;
   box-shadow: 0 0 12px #ef4444;
@@ -470,8 +502,8 @@ html, body {
 }
 
 @keyframes laserSweep {
-  from { top: 15%; }
-  to { top: 85%; }
+  from { top: 12%; }
+  to { top: 88%; }
 }
 
 .camera-shutter-dock {

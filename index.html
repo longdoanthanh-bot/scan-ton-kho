@@ -10,7 +10,7 @@
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=8">
+  <link rel="stylesheet" href="./styles.css?v=9">
 </head>
 <body>
 
@@ -100,17 +100,20 @@
             </div>
           </div>
 
-          <!-- Khung ngắm mã vạch phóng đại 3X -->
+          <!-- Khung ngắm trọn cả tem (Mã vạch phía trên + NSX / HSD phía dưới) -->
           <div class="barcode-aim-overlay">
             <div class="barcode-aim-box">
+              <div class="aim-zone-top">||||| MÃ VẠCH SỌC 13 SỐ |||||</div>
               <div class="laser-line"></div>
+              <div class="aim-zone-divider"></div>
+              <div class="aim-zone-bottom">📅 NSX &amp; HSD (Đưa trọn cả tem vào khung)</div>
             </div>
           </div>
 
           <!-- Cụm Nút Bấm Chụp Quét 1 Tem (Đọc cả Mã vạch + NSX + HSD trên tem) -->
           <div class="camera-shutter-dock">
             <div id="cameraStatusBadge" class="camera-badge">
-              👆 Đưa cả tem vào khung → Bấm nút tròn để quét Mã + NSX/HSD
+              👆 Đưa trọn cả tem vào khung → Bấm nút tròn để quét Mã + NSX/HSD
             </div>
             <button type="button" id="btnShutterScan" class="shutter-btn" aria-label="Bấm để chụp quét 1 tem">
               <span class="shutter-inner" id="shutterInnerLabel">
@@ -123,9 +126,9 @@
 
         <div class="camera-controls">
           <div id="zoomButtonsGroup" style="display:flex;gap:5px;">
-            <button type="button" class="btn btn-outline zoom-btn" data-zoom="1" style="padding:8px 10px;font-size:12.5px;">1x</button>
-            <button type="button" class="btn btn-primary zoom-btn" data-zoom="1.5" style="padding:8px 10px;font-size:12.5px;">1.5x Rõ nét</button>
-            <button type="button" class="btn btn-outline zoom-btn" data-zoom="2" style="padding:8px 10px;font-size:12.5px;">2x</button>
+            <button type="button" class="btn btn-primary zoom-btn" data-zoom="1" style="padding:8px 10px;font-size:12.5px;">1x Toàn tem</button>
+            <button type="button" class="btn btn-outline zoom-btn" data-zoom="1.4" style="padding:8px 10px;font-size:12.5px;">1.4x</button>
+            <button type="button" class="btn btn-outline zoom-btn" data-zoom="1.8" style="padding:8px 10px;font-size:12.5px;">1.8x</button>
           </div>
           <button type="button" id="btnToggleTorch" class="btn btn-outline" style="padding:8px 10px;font-size:12.5px;">🔦 Đèn</button>
           <button type="button" id="btnPickImage" class="btn btn-primary" style="flex:1;padding:8px 10px;font-size:12.5px;">🖼️ Chọn ảnh có sẵn</button>
@@ -216,7 +219,10 @@
       <section class="section-card">
         <div class="section-header">
           <h2 class="section-title">🕒 5 tem vừa quét gần nhất</h2>
-          <button type="button" id="btnQuickClearSession" class="icon-btn del" title="Xóa trắng để quét lại từ 0">🧹 Xóa làm lại từ 0</button>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" id="btnQuickPullSheet" class="icon-btn" title="Cập nhật ngay theo dữ liệu thực trên Google Sheet">🔄 Khớp GG Sheet</button>
+            <button type="button" id="btnQuickClearSession" class="icon-btn del" title="Xóa trắng để quét lại từ 0">🧹 Xóa làm lại từ 0</button>
+          </div>
         </div>
         <div id="recentScansPreview" class="scan-list"></div>
       </section>
@@ -229,6 +235,7 @@
         <div class="section-header">
           <h2 class="section-title">📋 Toàn bộ tem đã scan & Điều chỉnh</h2>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" id="btnHistoryPullSheet" class="btn btn-outline" style="padding:7px 10px;font-size:12.5px;">🔄 Khớp GG Sheet</button>
             <button type="button" id="btnOpenManualAdd2" class="btn btn-primary" style="padding:7px 10px;font-size:12.5px;">➕ Thêm / Điều chỉnh</button>
             <button type="button" id="btnExportExcel" class="btn btn-success" style="padding:7px 10px;font-size:12.5px;">📥 Xuất Excel</button>
             <button type="button" id="btnClearSession" class="btn btn-danger" style="padding:7px 10px;font-size:12.5px;">🧹 Xóa làm phiên mới</button>
@@ -296,7 +303,7 @@
         <div class="settings-hero-top">
           <div>
             <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-            <div class="brand-sub">Mọi ĐT & Máy PDA • Quét được khi mất mạng • Tự cập nhật khi có mạng</div>
+            <div class="brand-sub">Bản v9 • Tự đọc NSX/HSD • Tự khớp 2 chiều khi xóa/sửa trên GG Sheet</div>
           </div>
           <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
             <span id="syncStatusDot" class="sync-dot"></span>
@@ -498,10 +505,10 @@
   </div>
 
   <!-- Bộ giải mã mã vạch 1D + Bộ đọc chữ NSX/HSD trên tem nạp cục bộ 100% (chạy mượt cả khi mất mạng) -->
-  <script src="./vendor/zxing_wasm_reader.js?v=8"></script>
-  <script src="./vendor/ocr/tesseract.min.js?v=8"></script>
-  <script src="./catalog.js?v=8"></script>
-  <script src="./apps_script_embed.js?v=8"></script>
-  <script src="./app.js?v=8"></script>
+  <script src="./vendor/zxing_wasm_reader.js?v=9"></script>
+  <script src="./vendor/ocr/tesseract.min.js?v=9"></script>
+  <script src="./catalog.js?v=9"></script>
+  <script src="./apps_script_embed.js?v=9"></script>
+  <script src="./app.js?v=9"></script>
 </body>
 </html>

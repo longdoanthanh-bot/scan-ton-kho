@@ -1,7 +1,7 @@
 /**
  * ============================================================================
- * BỘ KẾT NỐI TỰ ĐỘNG APP QUÉT TỒN KHO (ĐIỆN THOẠI & PDA) <-> GOOGLE SHEET (v8)
- * Hỗ trợ đầy đủ cột NSX & HSD + Tự động nâng cấp bảo toàn 100% dữ liệu cũ
+ * BỘ KẾT NỐI TỰ ĐỘNG 2 CHIỀU APP QUÉT TỒN KHO <-> GOOGLE SHEET (v9)
+ * Hỗ trợ tự động đọc NSX & HSD + Đồng bộ tức thì khi xóa/sửa dòng trực tiếp trên Sheet
  * ============================================================================
  * - Google Sheet gắn cố định: https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0
  * - Đường truyền Web App (/exec): https://script.google.com/macros/s/AKfycbxlF9UorbWyYzxFA4avEIkloBab44VZzqznaxTXSSTAZtb13QRp5GQoHb_KGCAnAayg/exec
@@ -30,6 +30,49 @@ function onOpen() {
     .addToUi();
 }
 
+function onEdit(e) {
+  try {
+    if (!e || !e.range) return;
+    const sh = e.range.getSheet();
+    if (!sh || sh.getName() !== SHEET_CHI_TIET) return;
+    if (e.range.getRow() <= 1) return;
+    const lock = LockService.getScriptLock();
+    if (lock.tryLock(5000)) {
+      try {
+        rebuildTotalsAndSummaryInternal(sh.getParent());
+      } finally {
+        lock.releaseLock();
+      }
+    }
+  } catch (err) {}
+}
+
+function sheetNeedsSelfHeal(ss, parsedRecords) {
+  try {
+    const shDetail = ss.getSheetByName(SHEET_CHI_TIET);
+    const shSum = ss.getSheetByName(SHEET_TONG_HOP);
+    if (!shDetail || !shSum) return false;
+
+    const physicalRows = Math.max(0, shDetail.getLastRow() - 1);
+    if (physicalRows !== parsedRecords.length) {
+      return true;
+    }
+    if (parsedRecords.length > 0) {
+      const lastSeq = Number(shDetail.getRange(parsedRecords.length + 1, 7).getValue());
+      if (lastSeq !== parsedRecords.length) {
+        return true;
+      }
+    }
+    const sumCountVal = shSum.getRange('A5').getValue();
+    if (sumCountVal === '' || Number(sumCountVal) !== parsedRecords.length) {
+      return true;
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
 function doGet(e) {
   try {
     const action = (e && e.parameter && e.parameter.action) ? String(e.parameter.action) : 'status';
@@ -37,25 +80,38 @@ function doGet(e) {
     ensureSheetsExist(ss);
 
     if (action === 'ping') {
-      const sh = ss.getSheetByName(SHEET_CHI_TIET);
+      const recs = readAllScanRecords(ss);
       return jsonResponse({
         ok: true,
-        version: 'v8_nsx_hsd',
+        version: 'v9_live_sync',
         sheetName: ss.getName(),
         sheetUrl: ss.getUrl(),
-        totalRows: Math.max(0, sh.getLastRow() - 1),
+        totalRows: recs.length,
         serverTime: formatDateTimeVN(new Date())
       });
     }
 
     if (action === 'pull') {
+      let recs = readAllScanRecords(ss);
+      if (sheetNeedsSelfHeal(ss, recs)) {
+        const lock = LockService.getScriptLock();
+        if (lock.tryLock(8000)) {
+          try {
+            rebuildTotalsAndSummaryInternal(ss);
+            recs = readAllScanRecords(ss);
+          } finally {
+            lock.releaseLock();
+          }
+        }
+      }
+      const includeCat = !(e && e.parameter && String(e.parameter.lite || '') === '1');
       return jsonResponse({
         ok: true,
-        version: 'v8_nsx_hsd',
+        version: 'v9_live_sync',
         sheetName: ss.getName(),
         sheetUrl: ss.getUrl(),
-        records: readAllScanRecords(ss),
-        catalog: readCatalogRecords(ss),
+        records: recs,
+        catalog: includeCat ? readCatalogRecords(ss) : undefined,
         serverTime: formatDateTimeVN(new Date())
       });
     }
@@ -63,8 +119,8 @@ function doGet(e) {
     if (action === 'json_status') {
       return jsonResponse({
         ok: true,
-        version: 'v8_nsx_hsd',
-        message: 'Kết nối Google Sheet Quét Tồn Kho (có NSX & HSD) đang hoạt động tốt!',
+        version: 'v9_live_sync',
+        message: 'Kết nối 2 chiều Google Sheet Quét Tồn Kho (NSX & HSD) đang hoạt động tốt!',
         sheetName: ss.getName(),
         sheetUrl: ss.getUrl()
       });
@@ -77,8 +133,8 @@ function doGet(e) {
       '.box{max-width:480px;margin:20px auto;background:#fff;border-radius:14px;padding:22px;border:1.5px solid #cbd5e1;box-shadow:0 4px 14px rgba(0,0,0,.06)}',
       '.btn{display:block;padding:12px 16px;margin-top:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#fff;background:#0284c7}',
       '.btn.g{background:#15803d}</style></head><body><div class="box">',
-      '<h2 style="margin:0 0 8px;color:#0f2942">✅ Cổng Đồng Bộ Google Sheet Đang Hoạt Động</h2>',
-      '<p style="font-size:14px;color:#475569">Đã kết nối trực tiếp bảng tính <strong>' + ss.getName() + '</strong> (Hỗ trợ tự động lưu Mã SP, Số Ký, NSX & HSD).</p>',
+      '<h2 style="margin:0 0 8px;color:#0f2942">✅ Cổng Đồng Bộ 2 Chiều Google Sheet Đang Hoạt Động</h2>',
+      '<p style="font-size:14px;color:#475569">Đã kết nối trực tiếp bảng tính <strong>' + ss.getName() + '</strong> (Hỗ trợ tự động lưu Mã SP, Số Ký, NSX, HSD & đồng bộ ngược khi xóa/sửa dòng trên Sheet).</p>',
       '<a class="btn g" href="' + APP_ONLINE_URL + '" target="_top">📷 Mở Ứng Dụng Quét Tồn Kho</a>',
       '<a class="btn" href="' + ss.getUrl() + '" target="_blank">📊 Mở Bảng Tính Google Sheet</a>',
       '</div></body></html>'
@@ -100,13 +156,13 @@ function doPost(e) {
     ensureSheetsExist(ss);
 
     if (action === 'ping') {
-      const sh = ss.getSheetByName(SHEET_CHI_TIET);
+      const recs = readAllScanRecords(ss);
       return jsonResponse({
         ok: true,
-        version: 'v8_nsx_hsd',
+        version: 'v9_live_sync',
         sheetName: ss.getName(),
         sheetUrl: ss.getUrl(),
-        totalRows: Math.max(0, sh.getLastRow() - 1)
+        totalRows: recs.length
       });
     }
 
@@ -122,7 +178,14 @@ function doPost(e) {
         if (shCat.getLastRow() <= 1) writeCatalogRecords(ss, payload.catalog);
       }
       const summary = rebuildTotalsAndSummaryInternal(ss);
-      return jsonResponse({ ok: true, summary: summary, sheetUrl: ss.getUrl() });
+      const finalRecords = readAllScanRecords(ss);
+      return jsonResponse({
+        ok: true,
+        version: 'v9_live_sync',
+        summary: summary,
+        records: finalRecords,
+        sheetUrl: ss.getUrl()
+      });
     }
 
     if (action === 'sync_ops' && Array.isArray(payload.ops)) {
@@ -132,7 +195,14 @@ function doPost(e) {
         if (shCat.getLastRow() <= 1) writeCatalogRecords(ss, payload.catalog);
       }
       const summary = rebuildTotalsAndSummaryInternal(ss);
-      return jsonResponse({ ok: true, summary: summary, sheetUrl: ss.getUrl() });
+      const finalRecords = readAllScanRecords(ss);
+      return jsonResponse({
+        ok: true,
+        version: 'v9_live_sync',
+        summary: summary,
+        records: finalRecords,
+        sheetUrl: ss.getUrl()
+      });
     }
 
     return jsonResponse({ ok: false, error: 'Hành động không hợp lệ: ' + action });
@@ -214,7 +284,6 @@ function ensureSheetsExist(ss) {
     shCat.setColumnWidth(4, 150);
   }
 
-  // Tự động nâng cấp từ bảng 9 cột cũ lên 11 cột (thêm NSX & HSD ở cột E, F) bảo toàn 100% dữ liệu đang có!
   if (shDetail.getLastRow() === 0) {
     formatDetailHeader(shDetail);
   } else {
@@ -235,17 +304,19 @@ function readLegacy9ColRecords(sh) {
   const out = [];
   for (let i = 0; i < values.length; i++) {
     const row = values[i];
-    if (!row[0] && !row[2] && !row[8]) continue;
-    const rawKg = String(row[3] || '0').replace(/,/g, '').trim();
+    const code = String(row[2] || '').trim();
+    const rawKg = String(row[3] || '').replace(/,/g, '').trim();
     const grams = Math.round(parseFloat(rawKg || '0') * 1000);
+    if (!code && (isNaN(grams) || grams <= 0)) continue;
+    if (isNaN(grams) || grams <= 0) continue;
     const parts = String(row[7] || '').split(' | ');
     out.push({
       id: String(row[8] || ('row_' + (i + 2))),
       scannedAt: String(row[0] || ''),
       productName: String(row[1] || '—'),
-      productCode: String(row[2] || ''),
-      grams: isNaN(grams) ? 0 : grams,
-      weightKg: (isNaN(grams) ? 0 : grams) / 1000,
+      productCode: code,
+      grams: grams,
+      weightKg: grams / 1000,
       nsx: '',
       hsd: '',
       rawBarcode: parts[0] || '',
@@ -294,6 +365,10 @@ function applyOperations(ss, ops) {
     if ((op.type === 'add' || op.type === 'update') && op.record && op.record.id) {
       const r = op.record;
       const prev = mapById[String(r.id)] || null;
+      // Nếu là thao tác 'update' trên dòng đã bị người dùng xóa trực tiếp trên Google Sheet -> tôn trọng quyết định xóa trên Sheet, không tự hồi sinh!
+      if (op.type === 'update' && !prev) {
+        continue;
+      }
       const grams = Math.round(Number(r.grams !== undefined ? r.grams : Math.round(Number(r.weightKg) * 1000)));
       const incomingNsx = (r.nsx !== undefined) ? cleanDateField(r.nsx) : (prev ? prev.nsx : '');
       const incomingHsd = (r.hsd !== undefined) ? cleanDateField(r.hsd) : (prev ? prev.hsd : '');
@@ -320,6 +395,7 @@ function applyOperations(ss, ops) {
     if (item) finalList.push(item);
   }
   writeAllScanRecords(ss, finalList);
+  return finalList;
 }
 
 function readAllScanRecords(ss) {
@@ -336,21 +412,25 @@ function readAllScanRecords(ss) {
   const out = [];
   for (let i = 0; i < values.length; i++) {
     const row = values[i];
-    if (!row[0] && !row[2] && !row[10]) continue;
-    const rawKg = String(row[3] || '0').replace(/,/g, '').trim();
+    const code = String(row[2] || '').trim();
+    const rawKg = String(row[3] || '').replace(/,/g, '').trim();
     const grams = Math.round(parseFloat(rawKg || '0') * 1000);
+    // Nếu người dùng xóa dòng hoặc bôi đen bấm Delete xóa Mã SP / Số ký trên Sheet -> ghi nhận dòng đó đã bị xóa!
+    if ((!code && !String(row[0] || '').trim()) || isNaN(grams) || grams <= 0) {
+      continue;
+    }
     const parts = String(row[9] || '').split(' | ');
     out.push({
-      id: String(row[10] || ('row_' + (i + 2))),
-      scannedAt: String(row[0] || ''),
-      productName: String(row[1] || '—'),
-      productCode: String(row[2] || ''),
-      grams: isNaN(grams) ? 0 : grams,
-      weightKg: (isNaN(grams) ? 0 : grams) / 1000,
+      id: String(row[10] || '').trim() || ('sheet_row_' + (i + 2) + '_' + code + '_' + grams),
+      scannedAt: String(row[0] || '').trim(),
+      productName: String(row[1] || '—').trim() || '—',
+      productCode: code,
+      grams: grams,
+      weightKg: grams / 1000,
       nsx: cleanDateField(row[4]),
       hsd: cleanDateField(row[5]),
-      rawBarcode: parts[0] || '',
-      note: parts.slice(1).join(' | ')
+      rawBarcode: (parts[0] || '').trim(),
+      note: parts.slice(1).join(' | ').trim()
     });
   }
   return out;
@@ -403,7 +483,6 @@ function writeAllScanRecords(ss, records) {
     ]);
   }
 
-  // Định dạng văn bản (@) trước khi ghi để bảo toàn số 0 đầu & ngày tháng dd/MM/yyyy không bị đảo tháng/ngày
   sh.getRange(2, 1, rows.length, 1).setNumberFormat('@');
   sh.getRange(2, 3, rows.length, 1).setNumberFormat('@');
   sh.getRange(2, 5, rows.length, 2).setNumberFormat('@');
@@ -598,4 +677,4 @@ function jsonResponse(obj) {
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
-/* END_OF_CODE_GS_V8 */
+/* END_OF_CODE_GS_V9 */
