@@ -12,7 +12,9 @@
  *    - Thực thi dưới dạng (Execute as): "Tôi" (Me)
  *    - Ai có quyền truy cập (Who has access): "Bất kỳ ai" (Anyone)
  * 7. Bấm "Triển khai" (Deploy) -> Cấp quyền truy cập tài khoản Google -> Sao chép đường link Web App (có đuôi /exec).
- * 8. Dán đường link đó vào mục "Kết nối Google Sheet" trên App Điện thoại / PDA là XONG!
+ * 8. ĐÃ TRIỂN KHAI & GẮN CỐ ĐỊNH TRỰC TIẾP VÀO APP (KHÔNG CẦN CÀI ĐẶT THÊM):
+ *    - Google Sheet: https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0
+ *    - Web App (/exec): https://script.google.com/macros/s/AKfycbxlF9UorbWyYzxFA4avEIkloBab44VZzqznaxTXSSTAZtb13QRp5GQoHb_KGCAnAayg/exec
  * ============================================================================
  */
 
