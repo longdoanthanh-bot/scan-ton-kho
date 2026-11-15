@@ -196,7 +196,7 @@
       return;
     }
     const hadPreviousController = Boolean(navigator.serviceWorker.controller);
-    navigator.serviceWorker.register('./sw.js?v=10', { updateViaCache: 'none' }).then(function (reg) {
+    navigator.serviceWorker.register('./sw.js?v=10b', { updateViaCache: 'none' }).then(function (reg) {
       if (reg.waiting) {
         reg.waiting.postMessage('SKIP_WAITING');
       }
@@ -218,8 +218,8 @@
     navigator.serviceWorker.addEventListener('controllerchange', function () {
       if (!hadPreviousController || singleScanActive) return;
       try {
-        if (sessionStorage.getItem('sw_reloaded_v10') === '1') return;
-        sessionStorage.setItem('sw_reloaded_v10', '1');
+        if (sessionStorage.getItem('sw_reloaded_v10b') === '1') return;
+        sessionStorage.setItem('sw_reloaded_v10b', '1');
       } catch (e) {}
       window.location.reload();
     });
@@ -675,16 +675,18 @@
 
     const total = lumArr.length;
     let sum = 0;
-    let low = 30;
     let high = 230;
-    for (let k = 0; k < 256; k++) {
-      sum += hist[k];
-      if (sum >= total * 0.02) { low = k; break; }
-    }
-    sum = 0;
     for (let k = 255; k >= 0; k--) {
       sum += hist[k];
       if (sum >= total * 0.12) { high = k; break; }
+    }
+    // Ảnh đủ sáng (nền giấy >= 115): giữ điểm đen mảnh 0.25% để không làm dính khe số 6 ở xa; ảnh kho lạnh tối (< 115): kéo 2% để nét chữ đen rõ!
+    const lowRatio = high < 115 ? 0.02 : 0.0025;
+    let low = 30;
+    sum = 0;
+    for (let k = 0; k < 256; k++) {
+      sum += hist[k];
+      if (sum >= total * lowRatio) { low = k; break; }
     }
     const span = Math.max(14, high - low);
 
@@ -788,7 +790,7 @@
     }
   }
 
-  function buildRawBarcodeGuidedCropCanvas(fullCanvas, pos, extraTall) {
+  function buildRawBarcodeGuidedCropCanvas(fullCanvas, pos, extraDeg) {
     if (!pos || !pos.topLeft || !pos.topRight || !pos.bottomLeft || !pos.bottomRight) {
       return null;
     }
@@ -797,7 +799,7 @@
     const bw = Math.hypot(dx, dy);
     if (!bw || bw < 26) return null;
 
-    const angle = Math.atan2(dy, dx);
+    const angle = Math.atan2(dy, dx) + (((extraDeg || 0) * Math.PI) / 180);
     const cx = (pos.topLeft.x + pos.topRight.x + pos.bottomRight.x + pos.bottomLeft.x) / 4;
     const cy = (pos.topLeft.y + pos.topRight.y + pos.bottomRight.y + pos.bottomLeft.y) / 4;
 
@@ -805,10 +807,10 @@
     const uMin = -0.92 * bw;
     const uSpan = 1.41 * bw;
     const vMin = 0.34 * bw;
-    const vSpan = (extraTall ? 1.20 : 0.98) * bw;
+    const vSpan = 0.98 * bw;
 
-    // Tỷ lệ vàng 440px chiều ngang sọc (~620x430px vùng chữ): nét chữ rõ từng dấu chấm nhỏ mà tốc độ đọc chỉ ~0.20s!
-    const scale = Math.min(2.6, Math.max(1.05, 440 / bw));
+    // Tỷ lệ vàng 460px chiều ngang sọc (~650x450px vùng chữ): giữ rõ khe hở chữ số 6 ở cự ly xa mà tốc độ đọc chỉ ~0.19s!
+    const scale = Math.min(2.8, Math.max(1.05, 460 / bw));
     const outW = Math.max(180, Math.round(uSpan * scale));
     const outH = Math.max(90, Math.round(vSpan * scale));
 
@@ -885,11 +887,20 @@
         best = mergeDatePair(best, parseOcrNsxHsdText(resFlat && resFlat.data ? resFlat.data.text : ''));
         if (best.nsx && best.hsd) return best;
 
-        const tallRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, true);
-        if (tallRoi) {
-          const resTall = await worker.recognize(flattenIlluminationToCanvas(tallRoi));
-          best = mergeDatePair(best, parseOcrNsxHsdText(resTall && resTall.data ? resTall.data.text : ''));
-          if (best.nsx && best.hsd) return best;
+        // Lượt 1C: Bù độ lệch góc dư ±7° của tia quét ngang 1D khi cầm nghiêng lửng (VD: nghiêng 18° bắt ở lượt 11°)
+        const residualAngles = [-7, 7];
+        await worker.setParameters({
+          tessedit_pageseg_mode: '6',
+          tessedit_char_whitelist: '0123456789.:/-NSXHD '
+        });
+        for (let rIdx = 0; rIdx < residualAngles.length; rIdx++) {
+          const adjRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, residualAngles[rIdx]);
+          if (adjRoi) {
+            const adjSoft = enhanceSoftGrayscaleCanvas(adjRoi);
+            const resAdj = await worker.recognize(adjSoft);
+            best = mergeDatePair(best, parseOcrNsxHsdText(resAdj && resAdj.data ? resAdj.data.text : ''));
+            if (best.nsx && best.hsd) return best;
+          }
         }
       }
     }
@@ -1097,7 +1108,7 @@
       if (!pos0) {
         pos0 = await detectBarcodePositionOnCanvas(ctx.frameCanvas);
       }
-      const d0 = await extractNsxHsdWithTimeout(ctx.frameCanvas, pos0, 2400, Boolean(ctx.allowTilt));
+      const d0 = await extractNsxHsdWithTimeout(ctx.frameCanvas, pos0, 3400, Boolean(ctx.allowTilt));
       collected = mergeDatePair(collected, d0);
 
       // Nếu khung đầu bị rung tay nhẹ khi bấm chụp mà Camera vẫn đang mở -> tự lấy thêm tối đa 2 khung sắc nét kế tiếp ở chế độ ngầm!
@@ -1110,7 +1121,7 @@
           }
           const nextCanvas = captureCleanFullVideoCanvas(ctx.liveVideo);
           const nextPos = await detectBarcodePositionOnCanvas(nextCanvas);
-          const nextDates = await extractNsxHsdWithTimeout(nextCanvas, nextPos, 2200, f === 1);
+          const nextDates = await extractNsxHsdWithTimeout(nextCanvas, nextPos, 3200, f === 1);
           collected = mergeDatePair(collected, nextDates);
           if (collected.nsx && collected.hsd) break;
         }
@@ -2115,7 +2126,7 @@
     };
   }
 
-  async function tryDecodeRegionOnCanvas(workCanvas, workCtx, src, sx, sy, sw, sh, angleDeg, maxDim, padPx, doSharpen, useNative) {
+  async function tryDecodeRegionOnCanvas(workCanvas, workCtx, src, sx, sy, sw, sh, angleDeg, maxDim, padPx, doSharpen, useNative, needPosOnly) {
     const ratio = Math.min(1, (maxDim || 1900) / Math.max(1, Math.max(sw, sh)));
     const dw = Math.max(180, Math.round(sw * ratio));
     const dh = Math.max(110, Math.round(sh * ratio));
@@ -2196,6 +2207,8 @@
       } catch (e) {}
     }
 
+    if (needPosOnly) return null;
+
     const jsHit = decodeEan13PureJsFromImageData(imgData);
     if (jsHit) {
       return {
@@ -2212,21 +2225,38 @@
 
   async function detectBarcodePositionOnCanvas(canvas) {
     if (!canvas || !window.ZXingWASM || !window.ZXingWASM.readBarcodesFromImageData) return null;
-    const probeAngles = [0, -10, 10, -21, 21, -33, 33];
     const cw = canvas.width;
     const ch = canvas.height;
     const rotCanvas = document.createElement('canvas');
     const rotCtx = rotCanvas.getContext('2d', { willReadFrequently: true });
+    const plans = [
+      { crop: 1.0, deg: 0, sharp: false },
+      { crop: 1.0, deg: 0, sharp: true },
+      { crop: 0.56, deg: 0, sharp: true },
+      { crop: 1.0, deg: -11, sharp: true },
+      { crop: 1.0, deg: 11, sharp: true },
+      { crop: 0.58, deg: -12, sharp: true },
+      { crop: 0.58, deg: 12, sharp: true },
+      { crop: 1.0, deg: -19, sharp: true },
+      { crop: 1.0, deg: 19, sharp: true },
+      { crop: 1.0, deg: -32, sharp: true },
+      { crop: 1.0, deg: 32, sharp: true },
+      { crop: 1.0, deg: 90, sharp: true }
+    ];
 
-    for (let i = 0; i < probeAngles.length; i++) {
-      const deg = probeAngles[i];
+    for (let i = 0; i < plans.length; i++) {
+      const p = plans[i];
+      const sw = Math.max(120, Math.round(cw * p.crop));
+      const sh = Math.max(90, Math.round(ch * p.crop));
+      const sx = Math.round((cw - sw) / 2);
+      const sy = Math.round((ch - sh) / 2);
       try {
         const hit = await tryDecodeRegionOnCanvas(
-          rotCanvas, rotCtx, canvas, 0, 0, cw, ch, deg, 1700, 20, i > 0, false
+          rotCanvas, rotCtx, canvas, sx, sy, sw, sh, p.deg, 1850, 22, p.sharp, false, true
         );
         if (hit && hit.posOnWork) {
           return mapPositionToTargetCanvas(
-            hit.posOnWork, hit.dw, hit.dh, deg, 0, 0, cw, ch, cw, ch, cw, ch, hit.pad
+            hit.posOnWork, hit.dw, hit.dh, p.deg, sx, sy, sw, sh, cw, ch, cw, ch, hit.pad
           );
         }
       } catch (e) {}
@@ -2274,7 +2304,8 @@
         // 2. Xoay vòng quét độ phân giải gốc 1:1 (cận cảnh, cự ly xa 45cm, thiếu sáng, cầm nghiêng)
         if (!foundCode && cameraActive && !singleScanActive && radarLoopId === myLoopId) {
           const vis = getVisibleAimRectInVideo(video, 0.08);
-          const modeIdx = tick % 5;
+          const alreadyLockedFresh = Boolean(livePreLock && (Date.now() - livePreLock.lockedAt) < 420);
+          const modeIdx = alreadyLockedFresh ? (tick % 2) : (tick % 5);
           let rx = vis.sx;
           let ry = vis.sy;
           let rw = vis.sw;
@@ -2599,7 +2630,7 @@
       await warmUpWasmEngine();
       warmUpOcrWorker();
 
-      const cleanPack = await loadCleanCanvasFromFile(file, 1600);
+      const cleanPack = await loadCleanCanvasFromFile(file, 2200);
       const cleanCanvas = cleanPack.canvas;
 
       const wasmResultPromise = decodePhotoInBrowserWasm(file, cleanCanvas);
@@ -2941,21 +2972,23 @@
       const workCanvas = document.createElement('canvas');
       const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
 
-      // 12 lượt quét độ phân giải gốc (từ nhanh 15ms tới chuyên sâu cho ảnh chụp xa 12MP, kho lạnh tối, sát mép, nghiêng mọi góc)
+      // 15 lượt quét độ phân giải gốc (từ nhanh 15ms tới chuyên sâu cho ảnh chụp xa 12MP, kho lạnh tối, sát mép, nghiêng mọi góc)
       const passes = [
         { cw: 1.0, ch: 1.0, ox: 0, oy: 0, deg: 0, maxDim: 2050, pad: 24, sharp: false, nat: true },
         { cw: 1.0, ch: 1.0, ox: 0, oy: 0, deg: 0, maxDim: 2050, pad: 28, sharp: true, nat: false },
         { cw: 0.54, ch: 0.54, ox: 0, oy: 0, deg: 0, maxDim: 1950, pad: 24, sharp: true, nat: true },
+        { cw: 0.56, ch: 0.56, ox: 0, oy: 0, deg: -11, maxDim: 1850, pad: 24, sharp: true, nat: false },
+        { cw: 0.56, ch: 0.56, ox: 0, oy: 0, deg: 11, maxDim: 1850, pad: 24, sharp: true, nat: false },
         { cw: 0.34, ch: 0.34, ox: 0, oy: 0, deg: 0, maxDim: 1800, pad: 24, sharp: true, nat: false },
         { cw: 0.74, ch: 0.52, ox: 0, oy: -0.16, deg: 0, maxDim: 1850, pad: 24, sharp: true, nat: false },
         { cw: 0.74, ch: 0.52, ox: 0, oy: 0.16, deg: 0, maxDim: 1850, pad: 24, sharp: true, nat: false },
-        { cw: 0.88, ch: 0.88, ox: 0, oy: 0, deg: -9, maxDim: 1850, pad: 24, sharp: true, nat: false },
-        { cw: 0.88, ch: 0.88, ox: 0, oy: 0, deg: 9, maxDim: 1850, pad: 24, sharp: true, nat: false },
-        { cw: 0.84, ch: 0.84, ox: 0, oy: 0, deg: -19, maxDim: 1800, pad: 24, sharp: true, nat: false },
-        { cw: 0.84, ch: 0.84, ox: 0, oy: 0, deg: 19, maxDim: 1800, pad: 24, sharp: true, nat: false },
-        { cw: 0.80, ch: 0.80, ox: 0, oy: 0, deg: -33, maxDim: 1750, pad: 24, sharp: true, nat: false },
-        { cw: 0.80, ch: 0.80, ox: 0, oy: 0, deg: 33, maxDim: 1750, pad: 24, sharp: true, nat: false },
-        { cw: 0.92, ch: 0.92, ox: 0, oy: 0, deg: 90, maxDim: 1850, pad: 24, sharp: true, nat: false }
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: -10, maxDim: 1900, pad: 26, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: 10, maxDim: 1900, pad: 26, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: -19, maxDim: 1900, pad: 26, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: 19, maxDim: 1900, pad: 26, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: -33, maxDim: 1850, pad: 26, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: 33, maxDim: 1850, pad: 26, sharp: true, nat: false },
+        { cw: 0.98, ch: 0.98, ox: 0, oy: 0, deg: 90, maxDim: 1900, pad: 26, sharp: true, nat: false }
       ];
 
       let fallbackUnverified = null;
