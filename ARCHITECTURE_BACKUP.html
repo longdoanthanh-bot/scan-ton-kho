@@ -96,7 +96,9 @@
       </div>
       <ul>
         <li><strong>Cộng dồn chính xác tuyệt đối theo đơn vị gram nguyên</strong>: Toàn bộ phép cộng, sửa, xóa đều tính bằng số nguyên gram (<code>5198</code> gram) rồi mới chia <code>1.000</code> khi hiển thị, triệt tiêu 100% sai số làm tròn số thập phân.</li>
-        <li><strong>Nguyên tắc Không Tự Đoán (Fail-Closed)</strong>: Nếu quét trúng mã 5 số mới chưa có trong danh mục 120 mã sẵn có, hệ thống giữ trống tên là <code>—</code> và nhắc người dùng đặt tên, tuyệt đối không tự gán tên giả hay số ảo.</li>
+        <li><strong>Tự động đọc cả Ngày sản xuất (NSX) & Hạn sử dụng (HSD) trên tem (100% Offline)</strong>: Khi chụp quét bằng Camera điện thoại hoặc chọn ảnh tem, hệ thống tự động xoay phẳng theo góc nghiêng của mã vạch, cân bằng sáng và đọc chính xác hai dòng <code>NSX</code> & <code>HSD</code> in trên tem (ví dụ <code>12/11/2026</code> & <code>15/11/2026</code>) để gửi thẳng về Google Sheet.</li>
+        <li><strong>Nguyên tắc Không Tự Đoán (Fail-Closed)</strong>: Nếu quét bằng tia laser máy PDA chưa điền lô ngày hoặc chữ in trên tem bị rách không đọc được, hệ thống để trống <code>—</code>, tuyệt đối không tự đoán hay bịa ngày tháng.</li>
+        <li><strong>Giao diện tinh gọn tối đa</strong>: Toàn bộ khối tiêu đề và trạng thái kết nối Google Sheet được đưa gọn vào mục <strong>⚙️ Cài Đặt</strong> dưới thanh đáy để nhường trọn màn hình chính cho khung quét và bảng số liệu.</li>
       </ul>
     </div>
 
@@ -139,15 +141,19 @@ flowchart TD
               2. Tên sản phẩm<br>
               3. Mã sản phẩm<br>
               4. Số ký tem vừa scan<br>
-              5. Tổng số tem đã scan<br>
-              6. Tổng số sản phẩm đã scan<br>
-              7. Tổng số ký đã scan
+              5. <strong>NSX</strong> (Ngày sản xuất)<br>
+              6. <strong>HSD</strong> (Hạn sử dụng)<br>
+              7. Tổng số tem đã scan<br>
+              8. Tổng số sản phẩm đã scan<br>
+              9. Tổng số ký đã scan<br>
+              10. Mã vạch gốc / Ghi chú<br>
+              11. Mã dòng đồng bộ
             </td>
-            <td>Mỗi lần quét thêm 1 dòng; khi nhân viên bấm <strong>Sửa</strong> hoặc <strong>Xóa</strong> trên App, dòng tương ứng trên Google Sheet tự động sửa/xóa theo và tính lại toàn bộ các cột Tổng lũy kế từ trên xuống dưới.</td>
+            <td>Mỗi lần quét tự động ghi đủ Mã SP, Tên SP, Số ký, NSX & HSD; khi nâng cấp từ bảng cũ sang bảng mới hệ thống tự động di chuyển bảo toàn 100% các dòng đã quét trước đó.</td>
           </tr>
           <tr>
             <td><strong>2. Tong_Hop_Ton</strong></td>
-            <td>3 Ô Tổng quan lớn + Bảng gom nhóm theo từng Mã sản phẩm (Số tem, Tổng số ký, Bình quân Kg/tem, Tỷ trọng %)</td>
+            <td>3 Ô Tổng quan lớn + Bảng gom nhóm theo từng Mã sản phẩm (Số tem, Tổng số ký, Bình quân Kg/tem, Tỷ trọng %, Các lô NSX → HSD)</td>
             <td>Tự động gom nhóm và đối soát khớp 100% tới từng gram với trang <code>Chi_Tiet_Scan</code>.</td>
           </tr>
           <tr>
@@ -173,6 +179,7 @@ flowchart TD
           <tr><td><code>sw.js</code>, <code>manifest.json</code>, <code>icon-192.svg</code></td><td>Bộ lưu trữ ngoại tuyến (Offline) giúp mở app, quét tem và giữ nguyên dữ liệu khi kho lạnh mất sóng mạng, tự đẩy lên Google Sheet khi có mạng lại.</td></tr>
           <tr><td><code>catalog.js</code></td><td>Danh mục chuẩn 120 mã hàng 5 số trích xuất từ dữ liệu vận hành thực tế.</td></tr>
           <tr><td><code>vendor/zxing_wasm_reader.js</code>, <code>vendor/zxing_reader.wasm</code></td><td>Bộ giải mã hình ảnh mã vạch sọc 1D siêu tốc (kèm tầng dự phòng thuần JavaScript cho máy đời cũ), đã khóa cứng mã QR.</td></tr>
+          <tr><td><code>vendor/ocr/*</code></td><td>Bộ đọc chữ NSX & HSD trên tem cân nạp cục bộ 100% trên máy (hoạt động không cần mạng Internet).</td></tr>
           <tr><td><code>Google_Apps_Script_Ket_Noi_Sheet.gs</code></td><td>Đoạn mã gắn vào Google Sheet nhận đồng bộ tự động qua mọi mạng 4G/5G/Wi-Fi, chống ghi trùng dữ liệu.</td></tr>
           <tr><td><code>Cap_Nhat_Len_Web_Online.bat</code></td><td>Tệp bấm đúp cập nhật phiên bản mới lên đường link Online cố định (<code>https://longdoanthanh-bot.github.io/scan-ton-kho/</code>).</td></tr>
           <tr><td><code>kcs_verify.py</code></td><td>Kịch bản cầu dao tự ngắt kiểm tra chất lượng mã nguồn, tiếng Việt UTF-8, kiểm thử quét Offline và tự động đồng bộ khi có mạng.</td></tr>

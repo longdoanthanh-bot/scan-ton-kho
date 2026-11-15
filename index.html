@@ -6,39 +6,22 @@
   <meta name="theme-color" content="#0f2942">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Quét Tồn Kho Tem Mã Vạch (Mọi Điện Thoại & Máy PDA • Offline & Cloud)</title>
+  <title>Quét Tồn Kho Tem Mã Vạch (Mọi Điện Thoại & Máy PDA • Có NSX/HSD • Offline & Cloud)</title>
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=7">
+  <link rel="stylesheet" href="./styles.css?v=8">
 </head>
 <body>
 
-  <!-- Thanh tiêu đề cố định trên cùng -->
-  <header class="app-header">
-    <div class="header-top">
-      <div>
-        <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-        <div class="brand-sub">Mọi ĐT & Máy PDA • Quét được khi mất mạng • Tự cập nhật khi có mạng</div>
-      </div>
-      <div style="display:flex;gap:6px;align-items:center;">
-        <button type="button" id="btnInstallPwa" class="sync-pill" style="display:none;background:rgba(34,197,94,0.22);border-color:#4ade80;" title="Cài ra màn hình chính để mở nhanh khi mất mạng">
-          <span>📲 Cài Offline</span>
-        </button>
-        <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
-          <span id="syncStatusDot" class="sync-dot"></span>
-          <span id="syncStatusText">⚙️ Kết nối GG Sheet</span>
-        </button>
-      </div>
-    </div>
-    <div id="offlineStatusBar" style="display:none;margin-top:6px;background:#7c2d12;border:1px solid #fb923c;color:#ffedd5;padding:6px 10px;border-radius:8px;font-size:12px;font-weight:700;line-height:1.35;">
-      📴 <span id="offlineStatusBarText">Đang không có mạng (Offline) — Bạn cứ quét bình thường! Dữ liệu được lưu an toàn 100% trên máy và sẽ TỰ ĐỘNG cập nhật lên Google Sheet ngay khi có mạng.</span>
-    </div>
-  </header>
+  <!-- Thanh báo mất mạng gọn nhẹ (Ẩn hoàn toàn khi có mạng — chỉ hiện khi mất mạng) -->
+  <div id="offlineStatusBar" class="offline-top-bar" style="display:none;">
+    📴 <span id="offlineStatusBarText">Đang không có mạng (Offline) — Bạn cứ quét bình thường! Dữ liệu được lưu an toàn 100% trên máy và sẽ TỰ ĐỘNG cập nhật lên Google Sheet ngay khi có mạng.</span>
+  </div>
 
   <main class="app-container">
 
-    <!-- ==================== KHUNG QUÉT ĐẶT TRÊN ĐẦU (CHỈ HIỆN Ở TAB QUÉT TỒN) ==================== -->
+    <!-- ==================== KHUNG QUÉT ĐẶT SÁT ĐỈNH MÀN HÌNH CHO GỌN GÀNG ==================== -->
     <div id="scanTopSection">
 
       <!-- Thanh chọn chế độ quét -->
@@ -64,6 +47,18 @@
           >
           <button type="button" id="btnSubmitBarcode" class="btn btn-primary">Quét</button>
         </div>
+
+        <!-- Thanh gán nhanh NSX / HSD theo lô cho máy bắn tia laser PDA (để trống nếu chưa rõ — cấm tự đoán) -->
+        <div class="pda-lot-bar">
+          <div class="pda-lot-inputs">
+            <span class="pda-lot-label">📅 Lô PDA:</span>
+            <input type="text" id="pdaLotNsxInput" class="lot-input" placeholder="NSX (dd/mm/yyyy)" autocomplete="off">
+            <input type="text" id="pdaLotHsdInput" class="lot-input" placeholder="HSD (dd/mm/yyyy)" autocomplete="off">
+            <button type="button" id="btnReadLotPhoto" class="icon-btn" title="Chụp tem để tự đọc NSX & HSD cho lô PDA">📷 Đọc ngày</button>
+            <button type="button" id="btnClearLotDates" class="icon-btn del" style="display:none;padding:4px 7px;" title="Xóa ngày lô đang gán">✕</button>
+          </div>
+        </div>
+
         <div class="scan-helper-bar">
           <span id="scanModeHint">🔫 Chế độ PDA: Đã ẩn bàn phím ảo & tự nhận tia quét toàn màn hình</span>
           <div style="display:flex;gap:6px;">
@@ -73,17 +68,16 @@
         </div>
       </div>
 
-      <!-- Khung Camera Điện Thoại 3X — BẤM NÚT CHỤP MỚI BẮT ĐẦU QUÉT ĐÚNG 1 TEM (CHỐNG QUÉT DƯ 100%) -->
+      <!-- Khung Camera Điện Thoại 3X — BẤM NÚT CHỤP MỚI BẮT ĐẦU QUÉT ĐÚNG 1 TEM + TỰ ĐỌC NSX/HSD -->
       <div id="cameraBoxCard" class="camera-card" style="display:none;">
 
-        <!-- Hộp chuyển nhanh sang HTTPS nếu người dùng lỡ mở bằng cổng HTTP thường trên điện thoại -->
         <div id="httpsUpgradePrompt" style="display:none;background:#064e3b;border:2px solid #34d399;border-radius:11px;padding:12px;margin-bottom:10px;text-align:center;">
           <div style="font-weight:900;font-size:14.5px;color:#ecfdf5;margin-bottom:6px;">
             ⚡ Mở Camera Trực Tiếp Độ Nét Cao!
           </div>
           <div style="font-size:12.5px;color:#a7f3d0;margin-bottom:10px;line-height:1.45;">
             Điện thoại bắt buộc dùng kết nối bảo mật <strong>HTTPS</strong> mới cho bật Camera trực tiếp.<br>
-            Bấm nút xanh bên dưới (nếu máy hỏi bảo mật nội bộ → chọn <strong>Chi tiết / Nâng cao → Tiếp tục truy cập</strong> 1 lần đầu tiên):
+            Bấm nút xanh bên dưới để chuyển ngay sang kết nối bảo mật:
           </div>
           <a id="btnJumpHttps" href="#" class="btn btn-success" style="width:100%;font-size:14.5px;padding:12px;text-decoration:none;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
             🔒 BẬT CAMERA TRỰC TIẾP NGAY
@@ -98,6 +92,7 @@
             <div style="min-width:0;flex:1;">
               <div id="hudTopMeta" style="font-size:11.5px;color:#86efac;font-weight:800;">✅ TEM VỪA QUÉT</div>
               <div id="hudProductName" style="font-size:15px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
+              <div id="hudLotDates" style="font-size:11.5px;color:#bae6fd;font-weight:700;margin-top:1px;">NSX: — • HSD: —</div>
             </div>
             <div style="text-align:right;flex-shrink:0;">
               <div id="hudWeight" style="font-size:17px;font-weight:900;color:#4ade80;">0.000 Kg</div>
@@ -112,10 +107,10 @@
             </div>
           </div>
 
-          <!-- Cụm Nút Bấm Chụp Quét 1 Tem (Giống nút chụp hình điện thoại — Bấm mới quét, đọc xong 1 tem tự dừng ngay) -->
+          <!-- Cụm Nút Bấm Chụp Quét 1 Tem (Đọc cả Mã vạch + NSX + HSD trên tem) -->
           <div class="camera-shutter-dock">
             <div id="cameraStatusBadge" class="camera-badge">
-              👆 Đưa mã vạch vào khung → Bấm nút tròn để chụp quét 1 tem
+              👆 Đưa cả tem vào khung → Bấm nút tròn để quét Mã + NSX/HSD
             </div>
             <button type="button" id="btnShutterScan" class="shutter-btn" aria-label="Bấm để chụp quét 1 tem">
               <span class="shutter-inner" id="shutterInnerLabel">
@@ -138,6 +133,7 @@
       </div>
 
       <input type="file" id="hiddenImageInput" accept="image/*" capture="environment" style="display:none;">
+      <input type="file" id="hiddenDateOnlyImageInput" accept="image/*" capture="environment" style="display:none;">
     </div>
 
     <!-- ==================== THÔNG BÁO & 3 THẺ TỔNG HỢP ĐẶT DƯỚI PHẦN SCAN ==================== -->
@@ -167,20 +163,20 @@
     <!-- ==================== TAB 1: CHI TIẾT TEM VỪA QUÉT ==================== -->
     <div id="tabScan" class="tab-view active">
 
-      <!-- THẺ TEM VỪA SCAN -->
+      <!-- THẺ TEM VỪA SCAN (CÓ ĐỦ MÃ SP, SỐ KÝ, NSX & HSD) -->
       <section id="latestScanCard" class="latest-card">
-        <div id="latestEmptyState" style="text-align:center;padding:14px 6px;color:#475569;">
-          <div style="font-size:26px;margin-bottom:4px;">🏷️</div>
-          <div style="font-weight:800;color:#0f2942;">Sẵn sàng quét tem tồn kho siêu tốc</div>
-          <div style="font-size:12.5px;margin-top:2px;">
-            Quét dải mã vạch sọc 13 số trên tem (VD: <code>1010040051985</code> → Mã <code>10040</code>, Số ký <code>5.198 Kg</code>)
+        <div id="latestEmptyState" style="text-align:center;padding:12px 6px;color:#475569;">
+          <div style="font-size:24px;margin-bottom:3px;">🏷️</div>
+          <div style="font-weight:800;color:#0f2942;">Sẵn sàng quét tem tồn kho (Tự lấy Mã SP • Số ký • NSX • HSD)</div>
+          <div style="font-size:12px;margin-top:2px;">
+            Tự động lưu về bảng tính Google Sheet <strong>SCAN TỒN</strong> (kể cả quét khi mất mạng)
           </div>
         </div>
 
         <div id="latestContentState" style="display:none;">
           <div class="latest-header">
             <span class="latest-badge">✅ TEM VỪA SCAN</span>
-            <span class="latest-time">🕒 Ngày giờ scan: <strong id="latestTime">—</strong></span>
+            <span class="latest-time">🕒 <strong id="latestTime">—</strong></span>
           </div>
 
           <div style="font-size:11.5px;font-weight:700;color:#475569;">Tên sản phẩm:</div>
@@ -195,13 +191,22 @@
               <div class="detail-label">Số ký tem vừa scan</div>
               <div id="latestWeight" class="detail-val weight-highlight">0.000 Kg</div>
             </div>
+            <div class="detail-box detail-box-date">
+              <div class="detail-label">Ngày sản xuất (NSX)</div>
+              <div id="latestNsx" class="detail-val detail-val-date">—</div>
+            </div>
+            <div class="detail-box detail-box-date">
+              <div class="detail-label">Hạn sử dụng (HSD)</div>
+              <div id="latestHsd" class="detail-val detail-val-date hsd-accent">—</div>
+            </div>
           </div>
 
           <div class="latest-meta-row">
             <span id="latestBarcode">Mã vạch: —</span>
             <div class="latest-actions">
-              <button type="button" id="btnEditLatest" class="btn btn-warning" style="padding:7px 11px;font-size:12.5px;">✏️ Sửa ngay</button>
-              <button type="button" id="btnDeleteLatest" class="btn btn-danger" style="padding:7px 11px;font-size:12.5px;">🗑️ Xóa</button>
+              <button type="button" id="btnScanDatesLatest" class="btn btn-outline" style="padding:7px 9px;font-size:12px;" title="Chụp đọc bổ sung NSX/HSD trên tem">📷 Đọc NSX/HSD</button>
+              <button type="button" id="btnEditLatest" class="btn btn-warning" style="padding:7px 10px;font-size:12px;">✏️ Sửa</button>
+              <button type="button" id="btnDeleteLatest" class="btn btn-danger" style="padding:7px 10px;font-size:12px;">🗑️ Xóa</button>
             </div>
           </div>
         </div>
@@ -210,16 +215,8 @@
       <!-- 5 Dòng Vừa Quét Gần Nhất -->
       <section class="section-card">
         <div class="section-header">
-          <h2 class="section-title">🕒 5 tem vừa quét gần nhất (Bấm Sửa nếu sai)</h2>
-          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;font-weight:600;">
-            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-              <input type="checkbox" id="chkSoundToggle" checked> Âm báo
-            </label>
-            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
-              <input type="checkbox" id="chkDupGuardToggle" checked> Hỏi khi trùng sát nhau
-            </label>
-            <button type="button" id="btnQuickClearSession" class="icon-btn del" title="Xóa trắng để quét lại từ 0">🧹 Xóa làm lại từ 0</button>
-          </div>
+          <h2 class="section-title">🕒 5 tem vừa quét gần nhất</h2>
+          <button type="button" id="btnQuickClearSession" class="icon-btn del" title="Xóa trắng để quét lại từ 0">🧹 Xóa làm lại từ 0</button>
         </div>
         <div id="recentScansPreview" class="scan-list"></div>
       </section>
@@ -237,7 +234,7 @@
             <button type="button" id="btnClearSession" class="btn btn-danger" style="padding:7px 10px;font-size:12.5px;">🧹 Xóa làm phiên mới</button>
           </div>
         </div>
-        <input type="search" id="searchHistoryInput" class="search-input" placeholder="🔍 Tìm theo Mã sản phẩm (10040), Tên sản phẩm, hoặc Mã vạch...">
+        <input type="search" id="searchHistoryInput" class="search-input" placeholder="🔍 Tìm theo Mã SP, Tên SP, NSX/HSD (12/11/2026) hoặc Mã vạch...">
         <div id="fullScansList" class="scan-list"></div>
       </section>
     </div>
@@ -257,7 +254,7 @@
             <thead>
               <tr>
                 <th>Mã SP</th>
-                <th>Tên sản phẩm</th>
+                <th>Tên sản phẩm & Lô NSX/HSD</th>
                 <th class="num">Số tem</th>
                 <th class="num">Số ký (Kg)</th>
               </tr>
@@ -291,9 +288,64 @@
       </section>
     </div>
 
+    <!-- ==================== TAB 5: CÀI ĐẶT & KẾT NỐI GOOGLE SHEET (ĐƯA HEADER VÀO ĐÂY CHO GỌN MÀN HÌNH) ==================== -->
+    <div id="tabSettings" class="tab-view">
+
+      <!-- Thẻ Thông Tin Hệ Thống & Trạng Thái Đồng Bộ Google Sheet (Chuyển từ đầu trang vào Cài Đặt) -->
+      <section class="settings-hero-card">
+        <div class="settings-hero-top">
+          <div>
+            <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
+            <div class="brand-sub">Mọi ĐT & Máy PDA • Quét được khi mất mạng • Tự cập nhật khi có mạng</div>
+          </div>
+          <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
+            <span id="syncStatusDot" class="sync-dot"></span>
+            <span id="syncStatusText">Đã lưu GG Sheet</span>
+          </button>
+        </div>
+
+        <div class="settings-hero-actions">
+          <a id="btnSettingsOpenSheet" href="https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0" target="_blank" rel="noopener" class="btn btn-success" style="width:100%;text-decoration:none;">
+            📊 Mở Xem Bảng Tính Google Sheet (SCAN TỒN)
+          </a>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;">
+            <button type="button" id="btnSettingsForceSync" class="btn btn-primary">🔄 Đồng bộ ngay</button>
+            <button type="button" id="btnSettingsPullSheet" class="btn btn-outline" style="color:#0f172a;">⬇️ Tải từ Sheet về</button>
+          </div>
+          <button type="button" id="btnSettingsConfigSheet" class="btn btn-outline" style="width:100%;color:#0f172a;">
+            🔗 Cài đặt đường link Google Sheet / Sao chép Link dùng chung
+          </button>
+          <button type="button" id="btnInstallPwa" class="btn btn-warning" style="display:none;width:100%;">
+            📲 Cài ứng dụng ra màn hình chính (Mở nhanh khi mất mạng)
+          </button>
+        </div>
+      </section>
+
+      <!-- Tùy chọn Quét & Âm báo -->
+      <section class="section-card">
+        <h2 class="section-title" style="margin-bottom:10px;">⚙️ Tùy chọn thao tác quét</h2>
+        <div class="settings-toggle-list">
+          <label class="settings-toggle-row">
+            <span>🔊 Phát âm báo tiếng "Bíp" khi quét tem thành công / báo lỗi</span>
+            <input type="checkbox" id="chkSoundToggle" checked>
+          </label>
+          <label class="settings-toggle-row">
+            <span>🛡️ Hỏi xác nhận khi quét lặp cùng 1 mã vạch sát nhau (4 giây)</span>
+            <input type="checkbox" id="chkDupGuardToggle" checked>
+          </label>
+        </div>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e2e8f0;">
+          <button type="button" id="btnSettingsClearSession" class="btn btn-danger" style="width:100%;">
+            🧹 Xóa trắng toàn bộ phiên hiện tại để kiểm tồn đợt mới từ 0
+          </button>
+        </div>
+      </section>
+
+    </div>
+
   </main>
 
-  <!-- Thanh điều hướng dưới đáy màn hình -->
+  <!-- Thanh điều hướng dưới đáy màn hình (5 mục gọn gàng) -->
   <nav class="bottom-nav">
     <button type="button" class="nav-item active" data-tab="tabScan">
       <span class="nav-icon">📷</span>
@@ -301,15 +353,19 @@
     </button>
     <button type="button" class="nav-item" data-tab="tabHistory">
       <span class="nav-icon">✏️</span>
-      <span>Sửa / Đã quét<span id="navBadgeList"></span></span>
+      <span>Đã quét<span id="navBadgeList"></span></span>
     </button>
     <button type="button" class="nav-item" data-tab="tabSummary">
       <span class="nav-icon">📊</span>
-      <span>Theo Mã SP</span>
+      <span>Theo Mã</span>
     </button>
     <button type="button" class="nav-item" data-tab="tabCatalog">
       <span class="nav-icon">🗂️</span>
       <span>Danh Mục</span>
+    </button>
+    <button type="button" class="nav-item" data-tab="tabSettings">
+      <span class="nav-icon">⚙️</span>
+      <span>Cài Đặt<span id="navSyncMiniDot" class="nav-mini-dot ok"></span></span>
     </button>
   </nav>
 
@@ -334,9 +390,26 @@
         <input type="text" id="editWeightInput" class="form-control" inputmode="decimal" placeholder="5.198">
       </div>
 
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+        <div>
+          <label class="form-label" for="editNsxInput">Ngày sản xuất (NSX)</label>
+          <input type="text" id="editNsxInput" class="form-control" placeholder="VD: 12/11/2026">
+        </div>
+        <div>
+          <label class="form-label" for="editHsdInput">Hạn sử dụng (HSD)</label>
+          <input type="text" id="editHsdInput" class="form-control" placeholder="VD: 15/11/2026">
+        </div>
+      </div>
+
+      <div style="margin-bottom:11px;">
+        <button type="button" id="btnModalReadDates" class="btn btn-outline" style="width:100%;padding:8px 10px;font-size:12.5px;">
+          📷 Chụp / Chọn ảnh tem để tự động đọc NSX & HSD
+        </button>
+      </div>
+
       <div class="form-group">
         <label class="form-label" for="editNoteInput">Lý do sửa / Ghi chú điều chỉnh</label>
-        <input type="text" id="editNoteInput" class="form-control" placeholder="VD: Điều chỉnh số ký thực tế">
+        <input type="text" id="editNoteInput" class="form-control" placeholder="VD: Điều chỉnh số ký / cập nhật NSX HSD">
       </div>
 
       <label style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:#334155;cursor:pointer;">
@@ -369,26 +442,24 @@
     </div>
   </div>
 
-  <!-- ==================== MODAL CÀI ĐẶT KẾT NỐI GOOGLE SHEET 1 BƯỚC ==================== -->
+  <!-- ==================== MODAL CÀI ĐẶT KẾT NỐI GOOGLE SHEET ==================== -->
   <div id="sheetModal" class="modal-backdrop">
     <div class="modal-box">
       <h3 class="modal-title">📊 Kết Nối Tự Động Với Google Sheet</h3>
 
       <div style="background:#dcfce7;border:1.5px solid #22c55e;border-radius:10px;padding:10px 12px;margin-bottom:10px;color:#14532d;font-size:13px;font-weight:700;">
-        ✅ Đã gắn cố định & tự động lưu trực tiếp vào bảng tính <strong>SCAN TỒN</strong> của bạn! Mọi Điện thoại & Máy PDA mở link đều tự đồng bộ ngay mà không cần cài đặt gì thêm.
+        ✅ Đã gắn cố định & tự động lưu (gồm cả Mã SP, Số ký, NSX & HSD) trực tiếp vào bảng tính <strong>SCAN TỒN</strong> của bạn!
       </div>
 
       <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
-        <div style="font-weight:800;color:#0369a1;margin-bottom:4px;">Hướng dẫn mở cổng nhận dữ liệu cho file Google Sheet của bạn (chỉ làm 1 lần):</div>
+        <div style="font-weight:800;color:#0369a1;margin-bottom:4px;">Đổi sang file Google Sheet khác (nếu cần sau này):</div>
         <ol class="step-list">
-          <li>Bấm nút xanh đậm bên dưới để sao chép sẵn đoạn mã (đã gán cứng vào đúng file Sheet của bạn).</li>
-          <li>Trên file Google Sheet của bạn, vào menu trên cùng: <strong>Tiện ích mở rộng (Extensions) → Apps Script</strong>, xóa chữ mặc định có sẵn rồi <strong>Dán (Ctrl+V)</strong> mã vào → bấm biểu tượng đĩa mềm <strong>Lưu (Ctrl+S)</strong>.</li>
-          <li>Bấm nút xanh góc trên phải: <strong>Triển khai (Deploy) → Tùy chọn triển khai mới → biểu tượng bánh răng Chọn loại → Ứng dụng web (Web app)</strong>.</li>
-          <li>Mục <em>Ai có quyền truy cập</em> chọn <strong>Bất kỳ ai (Anyone)</strong> → bấm <strong>Triển khai</strong>.</li>
-          <li><strong>Lưu ý bước cấp quyền Google:</strong> Bấm <strong>Ủy quyền truy cập</strong> → chọn tài khoản Gmail → bấm chữ nhỏ <strong>Nâng cao (Advanced)</strong> ở góc trái dưới → bấm <strong>Đi tới Dự án... (không an toàn)</strong> → bấm <strong>Cho phép (Allow)</strong> → chép đường link có đuôi <code>/exec</code> dán vào ô dưới!</li>
+          <li>Bấm nút dưới để sao chép đoạn mã kết nối (đã có sẵn cột NSX & HSD).</li>
+          <li>Trên file Google Sheet mới, vào <strong>Tiện ích mở rộng → Apps Script</strong>, dán mã vào → bấm <strong>Lưu (Ctrl+S)</strong>.</li>
+          <li>Bấm <strong>Triển khai → Tùy chọn triển khai mới → Ứng dụng web</strong>, mục <em>Ai có quyền truy cập</em> chọn <strong>Bất kỳ ai (Anyone)</strong> → chép link <code>/exec</code> dán vào ô dưới!</li>
         </ol>
         <button type="button" id="btnCopyAppsScript" class="btn btn-navy" style="width:100%;">
-          📋 Bước 1: Sao chép Mã Kết Nối Đã Gán Sẵn Sheet Của Bạn
+          📋 Sao chép Mã Kết Nối Google Sheet (Có NSX & HSD)
         </button>
       </div>
 
@@ -398,11 +469,10 @@
       </div>
 
       <div class="form-group">
-        <label class="form-label" for="sheetViewUrlInput">Link mở xem file Google Sheet (tùy chọn — tự điền sau khi kết nối):</label>
+        <label class="form-label" for="sheetViewUrlInput">Link mở xem file Google Sheet:</label>
         <input type="url" id="sheetViewUrlInput" class="form-control" placeholder="https://docs.google.com/spreadsheets/d/...">
       </div>
 
-      <!-- Hộp chia sẻ nhanh 1 chạm cho mọi Điện thoại & PDA trong kho -->
       <div id="teamShareBox" style="display:none;background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:10px 12px;margin-bottom:10px;">
         <div style="font-weight:800;color:#15803d;font-size:13px;margin-bottom:4px;">
           📲 Gửi cho Điện thoại / Máy PDA khác (Dùng 4G hoặc bất kỳ Wi-Fi nào):
@@ -427,10 +497,11 @@
     </div>
   </div>
 
-  <!-- Bộ giải mã C++ WebAssembly siêu tốc nạp cục bộ (hoạt động cả khi mất mạng) -->
-  <script src="./vendor/zxing_wasm_reader.js?v=7"></script>
-  <script src="./catalog.js?v=7"></script>
-  <script src="./apps_script_embed.js?v=7"></script>
-  <script src="./app.js?v=7"></script>
+  <!-- Bộ giải mã mã vạch 1D + Bộ đọc chữ NSX/HSD trên tem nạp cục bộ 100% (chạy mượt cả khi mất mạng) -->
+  <script src="./vendor/zxing_wasm_reader.js?v=8"></script>
+  <script src="./vendor/ocr/tesseract.min.js?v=8"></script>
+  <script src="./catalog.js?v=8"></script>
+  <script src="./apps_script_embed.js?v=8"></script>
+  <script src="./app.js?v=8"></script>
 </body>
 </html>

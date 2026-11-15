@@ -41,9 +41,13 @@
   let lastScannedCode = '';
   let lastScannedEpoch = 0;
   let pendingDuplicateCode = null;
+  let pendingDuplicateDates = null;
+  let dateOnlyTarget = 'latest';
 
-  // Camera & WASM state (Chế độ Bấm Nút Chụp Mới Quét 1 Tem — Chống quét dư 100%)
+  // Camera, WASM & Offline OCR state
   let wasmReadyPromise = null;
+  let ocrWorkerPromise = null;
+  let ocrBusy = false;
   let mediaStream = null;
   let cameraActive = false;
   let torchEnabled = false;
@@ -137,8 +141,36 @@
     return wasmReadyPromise;
   }
 
+  function warmUpOcrWorker() {
+    if (ocrWorkerPromise) return ocrWorkerPromise;
+    if (!window.Tesseract || !window.Tesseract.createWorker) {
+      return Promise.resolve(null);
+    }
+    const base = new URL('./vendor/ocr/', window.location.href).href;
+    ocrWorkerPromise = window.Tesseract.createWorker('eng', 1, {
+      workerPath: base + 'worker.min.js',
+      corePath: base,
+      langPath: base,
+      gzip: true,
+      workerBlobURL: false,
+      cacheMethod: 'none',
+      logger: function () {}
+    }).then(async function (worker) {
+      await worker.setParameters({
+        tessedit_pageseg_mode: '11'
+      });
+      return worker;
+    }).catch(function () {
+      ocrWorkerPromise = null;
+      return null;
+    });
+    return ocrWorkerPromise;
+  }
+
   async function initApp() {
     warmUpWasmEngine();
+    setTimeout(function () { warmUpOcrWorker(); }, 250);
+
     if (navigator.storage && navigator.storage.persist) {
       navigator.storage.persist().catch(function () {});
     }
@@ -150,6 +182,7 @@
 
     bindEvents();
     updateOfflineBannerUI();
+    refreshSettingsSheetLinkUI();
 
     if (window.location.hash === '#camera') {
       applyModeUI('camera');
@@ -160,7 +193,7 @@
     renderAll();
 
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-      navigator.serviceWorker.register('./sw.js?v=7').catch(function () {});
+      navigator.serviceWorker.register('./sw.js?v=8').catch(function () {});
     }
 
     window.addEventListener('online', function () {
@@ -183,7 +216,6 @@
       }
     });
 
-    // Tự động kiểm tra và đẩy dữ liệu tồn đọng mỗi 12 giây ngay khi có sóng mạng trở lại
     setInterval(function () {
       if (navigator.onLine && pendingOps.length > 0 && settings.sheetWebAppUrl && !syncInProgress) {
         flushSyncQueue(true);
@@ -213,6 +245,13 @@
     }
   }
 
+  function refreshSettingsSheetLinkUI() {
+    const linkEl = document.getElementById('btnSettingsOpenSheet');
+    if (linkEl && settings.sheetViewUrl) {
+      linkEl.href = settings.sheetViewUrl;
+    }
+  }
+
   function loadSettings() {
     try {
       const raw = localStorage.getItem(STORAGE_SETTINGS);
@@ -230,6 +269,7 @@
       localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(settings));
     } catch (e) {}
     idbSave(STORAGE_SETTINGS, settings);
+    refreshSettingsSheetLinkUI();
   }
 
   function checkUrlParamsForSheet() {
@@ -351,7 +391,6 @@
       pendingOps = [];
     }
 
-    // Tự phục hồi từ kho IndexedDB nếu bộ nhớ trình duyệt bị dọn tạm
     if (!hasLocalRecords) {
       const vaultRecords = await idbLoad(STORAGE_RECORDS);
       if (Array.isArray(vaultRecords) && vaultRecords.length > 0) {
@@ -391,6 +430,343 @@
   function enqueueOp(op) {
     pendingOps.push(op);
     persistPendingOps();
+  }
+
+  // =========================================================================
+  // CHUẨN HÓA NGÀY SẢN XUẤT (NSX) & HẠN SỬ DỤNG (HSD) — FAIL-CLOSED (CẤM TỰ ĐOÁN)
+  // =========================================================================
+  function normalizeDateVN(raw) {
+    const s = String(raw || '').trim();
+    if (!s || s === '—' || s === '-' || s === 'null' || s === 'undefined') return '';
+
+    const pad2 = function (n) { return n < 10 ? ('0' + n) : String(n); };
+
+    // Dạng dd/MM/yyyy, dd.MM.yyyy, dd-MM-yyyy
+    let m = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](20[23]\d)$/);
+    if (m) {
+      const d = parseInt(m[1], 10);
+      const mo = parseInt(m[2], 10);
+      const y = parseInt(m[3], 10);
+      if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) {
+        return pad2(d) + '/' + pad2(mo) + '/' + y;
+      }
+      return '';
+    }
+
+    // Dạng yyyy-MM-dd
+    m = s.match(/^(20[23]\d)[.\/-](\d{1,2})[.\/-](\d{1,2})$/);
+    if (m) {
+      const y = parseInt(m[1], 10);
+      const mo = parseInt(m[2], 10);
+      const d = parseInt(m[3], 10);
+      if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) {
+        return pad2(d) + '/' + pad2(mo) + '/' + y;
+      }
+      return '';
+    }
+
+    // Dạng gõ nhanh 8 chữ số ddMMyyyy (VD: 12112026 -> 12/11/2026)
+    m = s.match(/^(\d{2})(\d{2})(20[23]\d)$/);
+    if (m) {
+      const d = parseInt(m[1], 10);
+      const mo = parseInt(m[2], 10);
+      const y = parseInt(m[3], 10);
+      if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) {
+        return pad2(d) + '/' + pad2(mo) + '/' + y;
+      }
+    }
+
+    return '';
+  }
+
+  function formatLotDateDisplay(val) {
+    const clean = normalizeDateVN(val);
+    return clean || '—';
+  }
+
+  function getActivePdaLotDates() {
+    const nsxEl = document.getElementById('pdaLotNsxInput');
+    const hsdEl = document.getElementById('pdaLotHsdInput');
+    const nsx = nsxEl ? normalizeDateVN(nsxEl.value) : '';
+    const hsd = hsdEl ? normalizeDateVN(hsdEl.value) : '';
+    return { nsx: nsx, hsd: hsd };
+  }
+
+  function refreshPdaLotClearBtn() {
+    const btn = document.getElementById('btnClearLotDates');
+    const nsxEl = document.getElementById('pdaLotNsxInput');
+    const hsdEl = document.getElementById('pdaLotHsdInput');
+    if (!btn || !nsxEl || !hsdEl) return;
+    const hasVal = (nsxEl.value.trim() !== '' || hsdEl.value.trim() !== '');
+    btn.style.display = hasVal ? 'inline-flex' : 'none';
+  }
+
+  // =========================================================================
+  // BỘ ĐỌC TỰ ĐỘNG NSX & HSD TRÊN TEM MEATCOOL (100% OFFLINE TESSERACT + CÂN BẰNG SÁNG CỤC BỘ)
+  // =========================================================================
+  function parseOcrNsxHsdText(rawText) {
+    const text = String(rawText || '');
+    if (!text) return { nsx: '', hsd: '' };
+
+    const pad2 = function (n) { return n < 10 ? ('0' + n) : String(n); };
+    const regex = /(0?[1-9]|[12]\d|3[01])[.\/-](0?[1-9]|1[0-2])[.\/-](20[23]\d)/g;
+    const found = [];
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+      const d = parseInt(match[1], 10);
+      const mo = parseInt(match[2], 10);
+      const y = parseInt(match[3], 10);
+      const checkDate = new Date(y, mo - 1, d);
+      if (
+        checkDate.getFullYear() === y &&
+        checkDate.getMonth() === (mo - 1) &&
+        checkDate.getDate() === d
+      ) {
+        const str = pad2(d) + '/' + pad2(mo) + '/' + y;
+        const prefixCtx = text.slice(Math.max(0, match.index - 28), match.index).toUpperCase();
+        found.push({
+          str: str,
+          epoch: checkDate.getTime(),
+          prefixCtx: prefixCtx
+        });
+      }
+    }
+
+    if (found.length === 0) return { nsx: '', hsd: '' };
+
+    // Khử trùng ngày giữ nguyên thứ tự
+    const unique = [];
+    const seen = {};
+    for (let i = 0; i < found.length; i++) {
+      if (!seen[found[i].str]) {
+        seen[found[i].str] = true;
+        unique.push(found[i]);
+      }
+    }
+
+    if (unique.length >= 2) {
+      unique.sort(function (a, b) { return a.epoch - b.epoch; });
+      return {
+        nsx: unique[0].str,
+        hsd: unique[unique.length - 1].str
+      };
+    }
+
+    // Nếu cả 2 dòng trên tem có cùng ngày (VD: NSX = HSD trong ngày)
+    if (found.length >= 2 && found[0].str === found[1].str) {
+      return { nsx: found[0].str, hsd: found[1].str };
+    }
+
+    // Chỉ đọc rõ được 1 ngày duy nhất -> kiểm tra nhãn NSX hay HSD đi kèm, tuyệt đối không tự đoán ngày còn lại!
+    const single = unique[0];
+    if (/H\s*S\s*D|S\s*D\s*:|EXP/.test(single.prefixCtx)) {
+      return { nsx: '', hsd: single.str };
+    }
+    if (/N\s*S\s*X|S\s*X\s*:|MFG/.test(single.prefixCtx)) {
+      return { nsx: single.str, hsd: '' };
+    }
+    return { nsx: '', hsd: '' };
+  }
+
+  function flattenIlluminationToCanvas(srcCanvas) {
+    const w = srcCanvas.width;
+    const h = srcCanvas.height;
+    const ctx = srcCanvas.getContext('2d', { willReadFrequently: true });
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    const gray = new Uint8Array(w * h);
+    const stride = w + 1;
+    const integral = new Float64Array((w + 1) * (h + 1));
+
+    for (let y = 0; y < h; y++) {
+      let rowSum = 0;
+      const rowOff = y * w;
+      const intOff = (y + 1) * stride;
+      const prevIntOff = y * stride;
+      for (let x = 0; x < w; x++) {
+        const p = (rowOff + x) * 4;
+        const g = (d[p] * 77 + d[p + 1] * 150 + d[p + 2] * 29) >> 8;
+        gray[rowOff + x] = g;
+        rowSum += g;
+        integral[intOff + x + 1] = integral[prevIntOff + x + 1] + rowSum;
+      }
+    }
+
+    const R = Math.max(18, Math.round(Math.min(w, h) * 0.09));
+    for (let y = 0; y < h; y++) {
+      const y0 = Math.max(0, y - R);
+      const y1 = Math.min(h - 1, y + R);
+      const r0 = y0 * stride;
+      const r1 = (y1 + 1) * stride;
+      const rowOff = y * w;
+      for (let x = 0; x < w; x++) {
+        const x0 = Math.max(0, x - R);
+        const x1 = Math.min(w - 1, x + R);
+        const count = (x1 - x0 + 1) * (y1 - y0 + 1);
+        const sum = integral[r1 + x1 + 1] - integral[r0 + x1 + 1] - integral[r1 + x0] + integral[r0 + x0];
+        const localMean = sum / count;
+        let v = localMean > 8 ? ((gray[rowOff + x] / localMean) * 250) : 255;
+        if (v > 232) {
+          v = 255;
+        } else {
+          v = Math.max(0, Math.min(255, Math.round(((v - 95) * 255) / 137)));
+        }
+        const p = (rowOff + x) * 4;
+        d[p] = v;
+        d[p + 1] = v;
+        d[p + 2] = v;
+        d[p + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+
+    const pad = 24;
+    const padded = document.createElement('canvas');
+    padded.width = w + pad * 2;
+    padded.height = h + pad * 2;
+    const pCtx = padded.getContext('2d');
+    pCtx.fillStyle = '#ffffff';
+    pCtx.fillRect(0, 0, padded.width, padded.height);
+    pCtx.drawImage(srcCanvas, pad, pad);
+    return padded;
+  }
+
+  function sampleBrightPaperRgb(canvas, cx, cy) {
+    try {
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      const sx = Math.max(0, Math.min(canvas.width - 12, Math.round(cx - 6)));
+      const sy = Math.max(0, Math.min(canvas.height - 1, Math.round(cy)));
+      const sw = Math.min(12, canvas.width - sx);
+      const strip = ctx.getImageData(sx, sy, Math.max(1, sw), 1).data;
+      let bestLum = -1;
+      let bestRgb = 'rgb(220,224,228)';
+      for (let i = 0; i < strip.length; i += 4) {
+        const lum = strip[i] + strip[i + 1] + strip[i + 2];
+        if (lum > bestLum) {
+          bestLum = lum;
+          bestRgb = 'rgb(' + strip[i] + ',' + strip[i + 1] + ',' + strip[i + 2] + ')';
+        }
+      }
+      return bestRgb;
+    } catch (e) {
+      return 'rgb(220,224,228)';
+    }
+  }
+
+  function buildBarcodeGuidedDateCanvas(fullCanvas, pos) {
+    if (!pos || !pos.topLeft || !pos.topRight || !pos.bottomLeft || !pos.bottomRight) {
+      return null;
+    }
+    const dx = pos.topRight.x - pos.topLeft.x;
+    const dy = pos.topRight.y - pos.topLeft.y;
+    const bw = Math.hypot(dx, dy);
+    if (!bw || bw < 36) return null;
+
+    const angle = Math.atan2(dy, dx);
+    const cx = (pos.topLeft.x + pos.topRight.x + pos.bottomRight.x + pos.bottomLeft.x) / 4;
+    const cy = (pos.topLeft.y + pos.topRight.y + pos.bottomRight.y + pos.bottomLeft.y) / 4;
+
+    const uMin = -0.82 * bw;
+    const uSpan = 1.25 * bw;
+    const vMin = 0.52 * bw;
+    const vSpan = 0.65 * bw;
+
+    const scale = Math.min(3.4, Math.max(1.6, 840 / bw));
+    const outW = Math.max(180, Math.round(uSpan * scale));
+    const outH = Math.max(90, Math.round(vSpan * scale));
+
+    const roi = document.createElement('canvas');
+    roi.width = outW;
+    roi.height = outH;
+    const rCtx = roi.getContext('2d', { willReadFrequently: true });
+    rCtx.fillStyle = sampleBrightPaperRgb(fullCanvas, cx, cy);
+    rCtx.fillRect(0, 0, outW, outH);
+
+    rCtx.save();
+    rCtx.scale(scale, scale);
+    rCtx.translate(-uMin, -vMin);
+    rCtx.rotate(-angle);
+    rCtx.translate(-cx, -cy);
+    rCtx.drawImage(fullCanvas, 0, 0);
+    rCtx.restore();
+
+    return flattenIlluminationToCanvas(roi);
+  }
+
+  function buildFullFrameDateCanvas(fullCanvas) {
+    const maxDim = 1080;
+    const scale = Math.min(1.6, maxDim / Math.max(1, Math.max(fullCanvas.width, fullCanvas.height)));
+    const w = Math.max(180, Math.round(fullCanvas.width * scale));
+    const h = Math.max(100, Math.round(fullCanvas.height * scale));
+    const tmp = document.createElement('canvas');
+    tmp.width = w;
+    tmp.height = h;
+    const ctx = tmp.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(fullCanvas, 0, 0, w, h);
+    return flattenIlluminationToCanvas(tmp);
+  }
+
+  async function extractNsxHsdFromCanvas(fullCanvas, barcodePos) {
+    if (!fullCanvas || ocrBusy || !window.Tesseract) return { nsx: '', hsd: '' };
+    const worker = await warmUpOcrWorker();
+    if (!worker) return { nsx: '', hsd: '' };
+
+    ocrBusy = true;
+    try {
+      let best = { nsx: '', hsd: '' };
+
+      // Lượt 1: Cắt chính xác vùng NSX / HSD theo tọa độ & góc nghiêng của mã vạch (tốc độ siêu nhanh ~120ms)
+      if (barcodePos) {
+        const guided = buildBarcodeGuidedDateCanvas(fullCanvas, barcodePos);
+        if (guided) {
+          const res1 = await worker.recognize(guided);
+          best = parseOcrNsxHsdText(res1 && res1.data ? res1.data.text : '');
+          if (best.nsx && best.hsd) {
+            return best;
+          }
+        }
+      }
+
+      // Lượt 2 (Dự phòng): Quét toàn khung ảnh đã làm phẳng ánh sáng (bắt cả ảnh chụp cận cảnh chỉ có chữ NSX/HSD)
+      const fullFlat = buildFullFrameDateCanvas(fullCanvas);
+      const res2 = await worker.recognize(fullFlat);
+      const fallback = parseOcrNsxHsdText(res2 && res2.data ? res2.data.text : '');
+      return {
+        nsx: best.nsx || fallback.nsx || '',
+        hsd: best.hsd || fallback.hsd || ''
+      };
+    } catch (e) {
+      return { nsx: '', hsd: '' };
+    } finally {
+      ocrBusy = false;
+    }
+  }
+
+  function extractNsxHsdWithTimeout(fullCanvas, barcodePos, timeoutMs) {
+    return new Promise(function (resolve) {
+      let settled = false;
+      const timer = setTimeout(function () {
+        if (!settled) {
+          settled = true;
+          resolve({ nsx: '', hsd: '' });
+        }
+      }, timeoutMs || 2200);
+
+      extractNsxHsdFromCanvas(fullCanvas, barcodePos).then(function (res) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve(res || { nsx: '', hsd: '' });
+        }
+      }).catch(function () {
+        if (!settled) {
+          settled = true;
+          clearTimeout(timer);
+          resolve({ nsx: '', hsd: '' });
+        }
+      });
+    });
   }
 
   // =========================================================================
@@ -449,22 +825,22 @@
     };
   }
 
-  function handleBarcodeInput(rawInput, sourceLabel) {
+  function handleBarcodeInput(rawInput, sourceLabel, extractedDates) {
     const cleaned = String(rawInput || '').replace(/[\r\n\t\s]+/g, '').trim();
     if (!cleaned) return;
 
     if (cleaned.length >= 26 && cleaned.length % 13 === 0 && /^\d+$/.test(cleaned)) {
       const count = cleaned.length / 13;
       for (let i = 0; i < count; i++) {
-        processSingleBarcode(cleaned.slice(i * 13, (i + 1) * 13), sourceLabel, true);
+        processSingleBarcode(cleaned.slice(i * 13, (i + 1) * 13), sourceLabel, true, extractedDates);
       }
       return;
     }
 
-    processSingleBarcode(cleaned, sourceLabel, false);
+    processSingleBarcode(cleaned, sourceLabel, false, extractedDates);
   }
 
-  function processSingleBarcode(bc, sourceLabel, bypassDupGuard) {
+  function processSingleBarcode(bc, sourceLabel, bypassDupGuard, extractedDates) {
     const parsed = parseSingle13DigitScaleBarcode(bc);
     if (!parsed.ok) {
       playBeep('error');
@@ -472,6 +848,12 @@
       showBanner('error', parsed.error);
       return;
     }
+
+    // Nếu không có ngày đọc từ ảnh Camera, kiểm tra ô Lô PDA người dùng chủ động nhập (nếu để trống -> trả về '' / '—' chuẩn Fail-Closed)
+    const pdaLot = getActivePdaLotDates();
+    const nsxVal = normalizeDateVN((extractedDates && extractedDates.nsx) ? extractedDates.nsx : pdaLot.nsx);
+    const hsdVal = normalizeDateVN((extractedDates && extractedDates.hsd) ? extractedDates.hsd : pdaLot.hsd);
+    const resolvedDates = { nsx: nsxVal, hsd: hsdVal };
 
     const nowMs = Date.now();
     if (
@@ -483,6 +865,7 @@
       playBeep('warn');
       vibrateDevice([90, 50, 90]);
       pendingDuplicateCode = bc;
+      pendingDuplicateDates = resolvedDates;
       document.getElementById('dupModalBarcode').textContent = bc;
       document.getElementById('dupModalInfo').textContent =
         (parsed.productName || 'Chưa có tên') + ' (' + parsed.productCode + ') — ' + formatKg(parsed.grams) + ' Kg';
@@ -490,17 +873,22 @@
       return;
     }
 
-    commitParsedScan(parsed);
+    commitParsedScan(parsed, resolvedDates);
   }
 
-  function commitParsedScan(parsed) {
+  function commitParsedScan(parsed, datesObj) {
     const now = new Date();
+    const nsxClean = (datesObj && datesObj.nsx) ? normalizeDateVN(datesObj.nsx) : '';
+    const hsdClean = (datesObj && datesObj.hsd) ? normalizeDateVN(datesObj.hsd) : '';
+
     const record = {
       id: 'scan_' + now.getTime() + '_' + Math.random().toString(36).slice(2, 7),
       scannedAt: formatDateTimeVN(now),
       productCode: parsed.productCode,
       productName: parsed.productName,
       grams: parsed.grams,
+      nsx: nsxClean,
+      hsd: hsdClean,
       rawBarcode: parsed.rawBarcode,
       note: '',
       edited: false
@@ -519,14 +907,18 @@
     persistRecords();
     enqueueOp({ type: 'add', record: toSyncRecord(record) });
 
+    const dateSuffix = (nsxClean || hsdClean)
+      ? (' | NSX: ' + (nsxClean || '—') + ' • HSD: ' + (hsdClean || '—'))
+      : '';
+
     if (parsed.productName === null) {
       playBeep('warn');
       vibrateDevice([80, 40, 80]);
-      showBanner('warn', 'Đã ghi nhận mã ' + parsed.productCode + ' (' + formatKg(parsed.grams) + ' Kg) nhưng chưa có Tên SP. Bấm "Sửa ngay" để đặt tên!');
+      showBanner('warn', 'Đã ghi nhận mã ' + parsed.productCode + ' (' + formatKg(parsed.grams) + ' Kg' + dateSuffix + ') nhưng chưa có Tên SP. Bấm "Sửa" để đặt tên!');
     } else {
       playBeep('ok');
       vibrateDevice([55]);
-      showBanner('ok', '✅ Đã quét: ' + parsed.productName + ' (' + parsed.productCode + ') — ' + formatKg(parsed.grams) + ' Kg');
+      showBanner('ok', '✅ Đã quét: ' + parsed.productName + ' (' + parsed.productCode + ') — ' + formatKg(parsed.grams) + ' Kg' + dateSuffix);
     }
 
     renderAll(true);
@@ -541,6 +933,8 @@
       productName: r.productName ? r.productName : '—',
       grams: r.grams,
       weightKg: r.grams / 1000,
+      nsx: normalizeDateVN(r.nsx) || '',
+      hsd: normalizeDateVN(r.hsd) || '',
       rawBarcode: r.rawBarcode || '',
       note: r.note || ''
     };
@@ -564,11 +958,16 @@
           code: code,
           name: r.productName ? r.productName : null,
           count: 0,
-          grams: 0
+          grams: 0,
+          lots: {}
         };
       }
       if (!byCode[code].name && r.productName) {
         byCode[code].name = r.productName;
+      }
+      if (r.nsx || r.hsd) {
+        const lotKey = formatLotDateDisplay(r.nsx) + ' → ' + formatLotDateDisplay(r.hsd);
+        byCode[code].lots[lotKey] = true;
       }
       byCode[code].count += 1;
       byCode[code].grams += g;
@@ -654,8 +1053,13 @@
       nameEl.classList.add('missing-name');
     }
 
+    const dispNsx = formatLotDateDisplay(latest.nsx);
+    const dispHsd = formatLotDateDisplay(latest.hsd);
+
     document.getElementById('latestCode').textContent = latest.productCode || '—';
     document.getElementById('latestWeight').textContent = formatKg(latest.grams) + ' Kg';
+    document.getElementById('latestNsx').textContent = dispNsx;
+    document.getElementById('latestHsd').textContent = dispHsd;
     document.getElementById('latestBarcode').textContent =
       'Mã vạch: ' + (latest.rawBarcode || 'Nhập thủ công') + (latest.note ? ' • ' + latest.note : '');
 
@@ -665,12 +1069,23 @@
     document.getElementById('btnDeleteLatest').onclick = function () {
       confirmDeleteRecord(latest.id);
     };
+    const btnScanDates = document.getElementById('btnScanDatesLatest');
+    if (btnScanDates) {
+      btnScanDates.onclick = function () {
+        dateOnlyTarget = 'latest';
+        document.getElementById('hiddenDateOnlyImageInput').click();
+      };
+    }
 
     if (liveHud) {
       document.getElementById('hudTopMeta').textContent =
         '✅ Đã quét • Tổng: ' + formatInt(m.totalScans) + ' tem | ' + formatInt(m.totalProducts) + ' SP | ' + formatKg(m.totalGrams) + ' Kg';
       document.getElementById('hudProductName').textContent =
         (latest.productName ? latest.productName : '— Chưa có tên') + ' (' + (latest.productCode || '—') + ')';
+      const hudDatesEl = document.getElementById('hudLotDates');
+      if (hudDatesEl) {
+        hudDatesEl.textContent = 'NSX: ' + dispNsx + ' • HSD: ' + dispHsd;
+      }
       document.getElementById('hudWeight').textContent = formatKg(latest.grams) + ' Kg';
       document.getElementById('btnHudEdit').onclick = function () {
         openEditModal(latest.id);
@@ -713,6 +1128,8 @@
       return (
         String(r.productCode || '').toLowerCase().indexOf(query) !== -1 ||
         String(r.productName || '').toLowerCase().indexOf(query) !== -1 ||
+        String(r.nsx || '').toLowerCase().indexOf(query) !== -1 ||
+        String(r.hsd || '').toLowerCase().indexOf(query) !== -1 ||
         String(r.rawBarcode || '').toLowerCase().indexOf(query) !== -1 ||
         String(r.note || '').toLowerCase().indexOf(query) !== -1
       );
@@ -730,6 +1147,11 @@
   function buildScanRowHtml(r, orderNum) {
     const dispName = r.productName ? escapeHtml(r.productName) : '<span style="color:#b45309;">— (Chưa có tên)</span>';
     const noteBadge = r.note ? ' <span style="color:#b45309;font-weight:700;">• ' + escapeHtml(r.note) + '</span>' : '';
+    const nsxDisp = formatLotDateDisplay(r.nsx);
+    const hsdDisp = formatLotDateDisplay(r.hsd);
+    const lotLine = (
+      '<div class="scan-lot-badge">📅 NSX: ' + escapeHtml(nsxDisp) + ' • HSD: ' + escapeHtml(hsdDisp) + '</div>'
+    );
     return (
       '<div class="scan-row-card' + (r.edited ? ' edited' : '') + '">' +
         '<div class="scan-row-left">' +
@@ -739,7 +1161,8 @@
             '<span>' + escapeHtml(r.scannedAt) + '</span>' +
           '</div>' +
           '<div class="scan-row-name">' + dispName + '</div>' +
-          '<div style="font-size:11.5px;color:#64748b;">' +
+          lotLine +
+          '<div style="font-size:11.5px;color:#64748b;margin-top:2px;">' +
             escapeHtml(r.rawBarcode || 'Nhập tay') + noteBadge +
           '</div>' +
         '</div>' +
@@ -764,10 +1187,14 @@
     for (let i = 0; i < m.productGroups.length; i++) {
       const g = m.productGroups[i];
       const dispName = g.name ? escapeHtml(g.name) : '<span style="color:#b45309;">— (Chưa đặt tên)</span>';
+      const lotKeys = Object.keys(g.lots || {});
+      const lotSub = lotKeys.length > 0
+        ? ('<div style="font-size:11.5px;color:#0369a1;font-weight:600;margin-top:2px;">📅 ' + escapeHtml(lotKeys.join('; ')) + '</div>')
+        : '';
       html += (
         '<tr>' +
           '<td><span class="code-chip">' + escapeHtml(g.code) + '</span></td>' +
-          '<td style="font-weight:700;">' + dispName + '</td>' +
+          '<td style="font-weight:700;">' + dispName + lotSub + '</td>' +
           '<td class="num">' + formatInt(g.count) + '</td>' +
           '<td class="num" style="color:#15803d;">' + formatKg(g.grams) + '</td>' +
         '</tr>'
@@ -824,9 +1251,12 @@
       : '✏️ Chỉnh Sửa Dòng Đã Quét';
 
     if (isNew) {
+      const pdaLot = getActivePdaLotDates();
       document.getElementById('editCodeInput').value = '';
       document.getElementById('editNameInput').value = '';
       document.getElementById('editWeightInput').value = '';
+      document.getElementById('editNsxInput').value = pdaLot.nsx || '';
+      document.getElementById('editHsdInput').value = pdaLot.hsd || '';
       document.getElementById('editNoteInput').value = 'Nhập bổ sung thủ công';
       document.getElementById('btnModalDelete').style.display = 'none';
     } else {
@@ -835,6 +1265,8 @@
       document.getElementById('editCodeInput').value = rec.productCode || '';
       document.getElementById('editNameInput').value = rec.productName || '';
       document.getElementById('editWeightInput').value = (rec.grams / 1000).toFixed(3);
+      document.getElementById('editNsxInput').value = normalizeDateVN(rec.nsx) || '';
+      document.getElementById('editHsdInput').value = normalizeDateVN(rec.hsd) || '';
       document.getElementById('editNoteInput').value = rec.note || '';
       document.getElementById('btnModalDelete').style.display = 'inline-flex';
       document.getElementById('btnModalDelete').onclick = function () {
@@ -851,6 +1283,8 @@
     const code = String(document.getElementById('editCodeInput').value || '').trim();
     const rawName = String(document.getElementById('editNameInput').value || '').trim();
     const weightStr = String(document.getElementById('editWeightInput').value || '').replace(',', '.').trim();
+    const rawNsx = String(document.getElementById('editNsxInput').value || '').trim();
+    const rawHsd = String(document.getElementById('editHsdInput').value || '').trim();
     const note = String(document.getElementById('editNoteInput').value || '').trim();
     const saveCat = document.getElementById('chkSaveToCatalog').checked;
 
@@ -863,6 +1297,17 @@
     const grams = Math.round(parsedKg * 1000);
     if (isNaN(grams) || grams <= 0 || grams > 500000) {
       alert('Vui lòng nhập Số ký hợp lệ lớn hơn 0 (ví dụ: 5.198).');
+      return;
+    }
+
+    const cleanNsx = normalizeDateVN(rawNsx);
+    if (rawNsx !== '' && rawNsx !== '—' && !cleanNsx) {
+      alert('Ngày sản xuất (NSX) chưa đúng định dạng ngày/tháng/năm (ví dụ: 12/11/2026).');
+      return;
+    }
+    const cleanHsd = normalizeDateVN(rawHsd);
+    if (rawHsd !== '' && rawHsd !== '—' && !cleanHsd) {
+      alert('Hạn sử dụng (HSD) chưa đúng định dạng ngày/tháng/năm (ví dụ: 15/11/2026).');
       return;
     }
 
@@ -880,6 +1325,8 @@
         productCode: code,
         productName: finalName,
         grams: grams,
+        nsx: cleanNsx,
+        hsd: cleanHsd,
         rawBarcode: '',
         note: note || 'Nhập thủ công',
         edited: true
@@ -892,6 +1339,8 @@
       records[idx].productCode = code;
       records[idx].productName = finalName;
       records[idx].grams = grams;
+      records[idx].nsx = cleanNsx;
+      records[idx].hsd = cleanHsd;
       records[idx].note = note || 'Đã chỉnh sửa';
       records[idx].edited = true;
       enqueueOp({ type: 'update', record: toSyncRecord(records[idx]) });
@@ -900,7 +1349,7 @@
     persistRecords();
     closeModal('editModal');
     renderAll(true);
-    showBanner('ok', 'Đã cập nhật số liệu và đồng bộ lại tổng cộng!');
+    showBanner('ok', 'Đã cập nhật số liệu (gồm NSX/HSD) và đồng bộ lên Google Sheet!');
     flushSyncQueue();
   }
 
@@ -920,7 +1369,7 @@
   }
 
   // =========================================================================
-  // UNIVERSAL CAMERA 1D SCANNER (MỌI ĐIỆN THOẠI iOS/ANDROID & MÁY PDA)
+  // UNIVERSAL CAMERA 1D SCANNER + AUTOMATIC NSX/HSD EXTRACTION
   // =========================================================================
   async function requestUniversalCameraStream() {
     const constraintsList = [
@@ -948,7 +1397,6 @@
         return await navigator.mediaDevices.getUserMedia(constraintsList[i]);
       } catch (err) {
         lastErr = err;
-        // Nếu người dùng bấm Từ chối quyền Camera thì không thử lại nữa
         if (err && (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError')) {
           throw err;
         }
@@ -963,7 +1411,6 @@
     const httpsPrompt = document.getElementById('httpsUpgradePrompt');
     const viewportBox = document.getElementById('cameraViewportBox');
 
-    // Kiểm tra nếu mở qua kết nối HTTP thường trên mạng nội bộ bị trình duyệt chặn Camera
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       httpsPrompt.style.display = 'block';
       viewportBox.style.display = 'flex';
@@ -979,6 +1426,7 @@
     viewportBox.style.display = 'flex';
 
     await warmUpWasmEngine();
+    warmUpOcrWorker();
 
     if ('BarcodeDetector' in window && !nativeDetector) {
       try {
@@ -1003,7 +1451,6 @@
       video.srcObject = mediaStream;
       await video.play();
 
-      // Bật lấy nét liên tục & Zoom thông minh 1.5x để không phải dí sát gây mờ tem
       const track = mediaStream.getVideoTracks()[0];
       hardwareZoomSupported = false;
       if (track && track.getCapabilities) {
@@ -1035,7 +1482,7 @@
     }
   }
 
-  function setShutterUIState(mode) {
+  function setShutterUIState(mode, customText) {
     const viewportBox = document.getElementById('cameraViewportBox');
     const statusEl = document.getElementById('cameraStatusBadge');
     const iconEl = document.getElementById('shutterIcon');
@@ -1047,16 +1494,16 @@
       viewportBox.classList.add('is-scanning');
       iconEl.textContent = '🎯';
       textEl.textContent = 'ĐANG ĐỌC';
-      statusEl.textContent = '⚡ Đang đọc 1 tem... Giữ mã vạch sọc nằm trong khung xanh!';
+      statusEl.textContent = customText || '⚡ Đang đọc 1 tem (Mã vạch + NSX + HSD)... Giữ yên trong khung!';
     } else if (mode === 'captured') {
       viewportBox.classList.add('is-captured');
       iconEl.textContent = '✅';
       textEl.textContent = 'XONG';
-      statusEl.textContent = '✅ Đã chụp quét xong 1 tem! Đổi sang tem mới rồi bấm nút tròn tiếp';
+      statusEl.textContent = customText || '✅ Đã chụp quét xong 1 tem! Đổi sang tem mới rồi bấm nút tròn tiếp';
     } else {
       iconEl.textContent = '📸';
       textEl.textContent = 'QUÉT';
-      statusEl.textContent = '👆 Đưa mã vạch vào khung → Bấm nút tròn để chụp quét 1 tem';
+      statusEl.textContent = '👆 Đưa cả tem vào khung → Bấm nút tròn để quét Mã + NSX/HSD';
     }
   }
 
@@ -1079,20 +1526,17 @@
         return;
       } catch (e) {}
     }
-    // Phóng cận kỹ thuật số mượt nếu ống kính không hỗ trợ zoom phần cứng
     video.style.transform = currentZoom > 1 ? ('scale(' + currentZoom + ')') : 'none';
   }
 
   function onShutterScanClick() {
     if (Date.now() < shutterLockUntil) return;
 
-    // Nếu chưa mở được luồng video trực tiếp (ví dụ đang mở qua HTTP hoặc chưa cấp quyền) -> mở chụp 1 ảnh
     if (!cameraActive || !mediaStream) {
       document.getElementById('hiddenImageInput').click();
       return;
     }
 
-    // Nếu đang trong lúc tìm mã mà người dùng bấm lại -> hủy dừng ngay
     if (singleScanActive) {
       singleScanActive = false;
       singleScanToken += 1;
@@ -1101,6 +1545,39 @@
     }
 
     runSingleShotCameraScan();
+  }
+
+  function captureCleanFullVideoCanvas(video) {
+    const vw = video.videoWidth;
+    const vh = video.videoHeight;
+    const maxDim = 1360;
+    const scale = Math.min(1, maxDim / Math.max(1, Math.max(vw, vh)));
+    const ow = Math.max(200, Math.round(vw * scale));
+    const oh = Math.max(150, Math.round(vh * scale));
+    const c = document.createElement('canvas');
+    c.width = ow;
+    c.height = oh;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(video, 0, 0, vw, vh, 0, 0, ow, oh);
+    return c;
+  }
+
+  function mapPointFromCropToFull(pt, dw, dh, angleDeg, cropX, cropY, cropW, cropH, vw, vh, ow, oh) {
+    let px = pt.x;
+    let py = pt.y;
+    if (angleDeg !== 0) {
+      const rad = (-angleDeg * Math.PI) / 180;
+      const dx = px - dw / 2;
+      const dy = py - dh / 2;
+      px = dx * Math.cos(rad) - dy * Math.sin(rad) + dw / 2;
+      py = dx * Math.sin(rad) + dy * Math.cos(rad) + dh / 2;
+    }
+    const vx = cropX + (px / dw) * cropW;
+    const vy = cropY + (py / dh) * cropH;
+    return {
+      x: (vx / vw) * ow,
+      y: (vy / vh) * oh
+    };
   }
 
   async function runSingleShotCameraScan() {
@@ -1126,7 +1603,7 @@
 
         const zoomDiv = (!hardwareZoomSupported && currentZoom > 1) ? currentZoom : 1;
         const cropW = Math.floor((vw * 0.94) / zoomDiv);
-        const cropH = Math.floor((vh * 0.82) / zoomDiv);
+        const cropH = Math.floor((vh * 0.86) / zoomDiv);
         const cropX = Math.floor((vw - cropW) / 2);
         const cropY = Math.floor((vh - cropH) / 2);
 
@@ -1155,6 +1632,7 @@
         offCtx.restore();
 
         let candidate = null;
+        let hitPosOnCrop = null;
 
         // 1. Thử bộ giải mã phần cứng của máy (nếu có)
         if (nativeDetector && angleDeg === 0) {
@@ -1168,18 +1646,19 @@
 
         let imgDataCache = null;
 
-        // 2. Bộ giải mã C++ SIMD WebAssembly siêu tốc (bắt cả xoay ngang/dọc 90 độ)
-        if (!candidate && window.ZXingWASM && window.ZXingWASM.readBarcodesFromImageData) {
+        // 2. Bộ giải mã C++ SIMD WebAssembly siêu tốc (trả về luôn tọa độ 4 góc mã vạch để cắt vùng NSX/HSD)
+        if ((!candidate || !hitPosOnCrop) && window.ZXingWASM && window.ZXingWASM.readBarcodesFromImageData) {
           try {
             imgDataCache = offCtx.getImageData(0, 0, dw, dh);
             const wasmHits = await window.ZXingWASM.readBarcodesFromImageData(imgDataCache, WASM_1D_OPTIONS);
             if (wasmHits && wasmHits.length > 0 && wasmHits[0].text) {
-              candidate = String(wasmHits[0].text).trim();
+              if (!candidate) candidate = String(wasmHits[0].text).trim();
+              if (wasmHits[0].position) hitPosOnCrop = wasmHits[0].position;
             }
           } catch (e) {}
         }
 
-        // 3. Bộ giải mã EAN-13 thuần JavaScript dự phòng cho điện thoại/PDA đời cũ không hỗ trợ WASM
+        // 3. Bộ giải mã EAN-13 thuần JavaScript dự phòng cho điện thoại/PDA đời cũ
         if (!candidate) {
           try {
             if (!imgDataCache) imgDataCache = offCtx.getImageData(0, 0, dw, dh);
@@ -1191,12 +1670,27 @@
         if (candidate && singleScanToken === myToken && singleScanActive) {
           const check = parseSingle13DigitScaleBarcode(candidate);
           if (check.ok) {
-            // NGẮT CẦU DAO NGAY LẬP TỨC — CHỈ LẤY ĐÚNG 1 TEM DUY NHẤT CHO MỖI LẦN BẤM NÚT!
+            // Chụp ngay khung hình gốc toàn cảm biến trước khi người dùng nhấc máy để đọc NSX & HSD!
+            const fullFrameCanvas = captureCleanFullVideoCanvas(video);
             singleScanActive = false;
             singleScanToken += 1;
             shutterLockUntil = Date.now() + 500;
+
+            let mappedPos = null;
+            if (hitPosOnCrop && hitPosOnCrop.topLeft && hitPosOnCrop.topRight) {
+              mappedPos = {
+                topLeft: mapPointFromCropToFull(hitPosOnCrop.topLeft, dw, dh, angleDeg, cropX, cropY, cropW, cropH, vw, vh, fullFrameCanvas.width, fullFrameCanvas.height),
+                topRight: mapPointFromCropToFull(hitPosOnCrop.topRight, dw, dh, angleDeg, cropX, cropY, cropW, cropH, vw, vh, fullFrameCanvas.width, fullFrameCanvas.height),
+                bottomRight: mapPointFromCropToFull(hitPosOnCrop.bottomRight, dw, dh, angleDeg, cropX, cropY, cropW, cropH, vw, vh, fullFrameCanvas.width, fullFrameCanvas.height),
+                bottomLeft: mapPointFromCropToFull(hitPosOnCrop.bottomLeft, dw, dh, angleDeg, cropX, cropY, cropW, cropH, vw, vh, fullFrameCanvas.width, fullFrameCanvas.height)
+              };
+            }
+
+            setShutterUIState('scanning', '⚡ Đã bắt mã ' + check.productCode + ' — Đang đọc NSX & HSD trên tem...');
+            const ocrDates = await extractNsxHsdWithTimeout(fullFrameCanvas, mappedPos, 2000);
+
             setShutterUIState('captured');
-            handleBarcodeInput(candidate, 'Camera');
+            handleBarcodeInput(candidate, 'Camera', ocrDates);
             setTimeout(function () {
               if (!singleScanActive && cameraActive) {
                 setShutterUIState('ready');
@@ -1220,7 +1714,7 @@
       vibrateDevice([100, 50, 100]);
       showBanner(
         'error',
-        lastInvalidError || 'Chưa đọc rõ dải mã vạch sọc. Hãy giữ chắc tay đưa mã vào khung rồi bấm nút tròn lại!'
+        lastInvalidError || 'Chưa đọc rõ dải mã vạch sọc. Hãy giữ chắc tay đưa tem vào khung rồi bấm nút tròn lại!'
       );
     }
   }
@@ -1255,32 +1749,137 @@
   }
 
   // =========================================================================
-  // TURBO PHOTO / IMAGE DECODER (PARALLEL SERVER C++ & MULTI-ANGLE WASM)
+  // TURBO PHOTO / IMAGE DECODER + AUTOMATIC NSX / HSD EXTRACTION
   // =========================================================================
+  async function loadCleanCanvasFromFile(file, maxDim) {
+    const bmp = await loadImageSourceForCanvas(file);
+    const drawSource = bmp._el || bmp;
+    const limit = maxDim || 1500;
+    const ratio = Math.min(1, limit / Math.max(1, Math.max(bmp.width, bmp.height)));
+    const cw = Math.max(160, Math.round(bmp.width * ratio));
+    const ch = Math.max(100, Math.round(bmp.height * ratio));
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(drawSource, 0, 0, cw, ch);
+    if (bmp.close) bmp.close();
+    return { canvas: canvas, scaleRatio: ratio };
+  }
+
   async function decodeBarcodeFromImageFile(file) {
     if (!file) return;
-    showBanner('warn', '⚡ Đang quét siêu tốc dải mã vạch sọc...');
+    showBanner('warn', '⚡ Đang quét mã vạch sọc & đọc NSX / HSD trên tem...');
 
     try {
       await warmUpWasmEngine();
+      warmUpOcrWorker();
 
-      // Chạy đua song song: Bộ máy nào đọc ra mã trước thì trả kết quả NGAY LẬP TỨC (0.02 - 0.1 giây)!
-      const tasks = [decodePhotoInBrowserWasm(file)];
+      const cleanPack = await loadCleanCanvasFromFile(file, 1500);
+      const cleanCanvas = cleanPack.canvas;
+
+      const wasmResultPromise = decodePhotoInBrowserWasm(file, cleanCanvas);
+      const tasks = [wasmResultPromise];
       if (location.protocol.startsWith('http') && (location.port === '8088' || location.port === '8443')) {
-        tasks.push(decodePhotoViaLocalCppServer(file));
+        tasks.push(decodePhotoViaLocalCppServer(file).then(function (c) {
+          return c ? { code: c, position: null } : null;
+        }));
       }
 
-      const foundCode = await raceFirstNonNull(tasks);
+      const hit = await raceFirstNonNull(tasks);
 
-      if (foundCode) {
-        handleBarcodeInput(foundCode, 'Ảnh chụp');
+      if (hit && hit.code) {
+        let hitPos = hit.position || null;
+        if (!hitPos && window.ZXingWASM && window.ZXingWASM.readBarcodesFromImageData) {
+          try {
+            const cCtx = cleanCanvas.getContext('2d', { willReadFrequently: true });
+            const wHits = await window.ZXingWASM.readBarcodesFromImageData(
+              cCtx.getImageData(0, 0, cleanCanvas.width, cleanCanvas.height),
+              WASM_1D_OPTIONS
+            );
+            if (wHits && wHits.length > 0 && wHits[0].position) {
+              hitPos = wHits[0].position;
+            }
+          } catch (e) {}
+        }
+        const ocrDates = await extractNsxHsdWithTimeout(cleanCanvas, hitPos, 2400);
+        handleBarcodeInput(hit.code, 'Ảnh chụp', ocrDates);
       } else {
+        // Nếu người dùng chụp cận cảnh phần chữ NSX/HSD trên tem -> tự động đọc ngày gắn vào tem vừa quét!
+        const onlyDates = await extractNsxHsdWithTimeout(cleanCanvas, null, 2400);
+        if ((onlyDates.nsx || onlyDates.hsd) && records.length > 0) {
+          const latest = records[records.length - 1];
+          if (onlyDates.nsx) latest.nsx = onlyDates.nsx;
+          if (onlyDates.hsd) latest.hsd = onlyDates.hsd;
+          persistRecords();
+          enqueueOp({ type: 'update', record: toSyncRecord(latest) });
+          renderAll(true);
+          flushSyncQueue();
+          playBeep('ok');
+          showBanner(
+            'ok',
+            '✅ Đã đọc từ ảnh & cập nhật vào tem vừa quét: NSX ' + formatLotDateDisplay(latest.nsx) + ' • HSD ' + formatLotDateDisplay(latest.hsd)
+          );
+          return;
+        }
         playBeep('error');
         showBanner('error', 'Không thấy rõ dải mã vạch 13 số trong ảnh. Hãy đưa camera cách tem khoảng 20–25cm cho nét rồi chụp lại!');
       }
     } catch (err) {
       playBeep('error');
       showBanner('error', 'Không đọc được ảnh vừa chọn. Vui lòng thử lại!');
+    }
+  }
+
+  async function decodeDateOnlyImageFile(file) {
+    if (!file) return;
+    showBanner('warn', '⚡ Đang đọc tự động NSX & HSD từ ảnh tem...');
+    try {
+      const cleanPack = await loadCleanCanvasFromFile(file, 1400);
+      let hitPos = null;
+      if (window.ZXingWASM && window.ZXingWASM.readBarcodesFromImageData) {
+        try {
+          const cCtx = cleanPack.canvas.getContext('2d', { willReadFrequently: true });
+          const wHits = await window.ZXingWASM.readBarcodesFromImageData(
+            cCtx.getImageData(0, 0, cleanPack.canvas.width, cleanPack.canvas.height),
+            WASM_1D_OPTIONS
+          );
+          if (wHits && wHits.length > 0 && wHits[0].position) {
+            hitPos = wHits[0].position;
+          }
+        } catch (e) {}
+      }
+
+      const dates = await extractNsxHsdWithTimeout(cleanPack.canvas, hitPos, 2600);
+      if (!dates.nsx && !dates.hsd) {
+        playBeep('error');
+        showBanner('error', 'Chưa đọc rõ chữ NSX / HSD trong ảnh. Hãy chụp rõ nét dòng NSX / HSD trên tem!');
+        return;
+      }
+
+      playBeep('ok');
+      if (dateOnlyTarget === 'modal') {
+        if (dates.nsx) document.getElementById('editNsxInput').value = dates.nsx;
+        if (dates.hsd) document.getElementById('editHsdInput').value = dates.hsd;
+        showBanner('ok', '✅ Đã điền tự động NSX: ' + (dates.nsx || '—') + ' • HSD: ' + (dates.hsd || '—'));
+      } else if (dateOnlyTarget === 'pda_lot') {
+        if (dates.nsx) document.getElementById('pdaLotNsxInput').value = dates.nsx;
+        if (dates.hsd) document.getElementById('pdaLotHsdInput').value = dates.hsd;
+        refreshPdaLotClearBtn();
+        showBanner('ok', '✅ Đã gán Lô PDA: NSX ' + (dates.nsx || '—') + ' • HSD ' + (dates.hsd || '—') + ' cho các tem bắn tiếp theo!');
+      } else if (records.length > 0) {
+        const latest = records[records.length - 1];
+        if (dates.nsx) latest.nsx = dates.nsx;
+        if (dates.hsd) latest.hsd = dates.hsd;
+        persistRecords();
+        enqueueOp({ type: 'update', record: toSyncRecord(latest) });
+        renderAll(true);
+        flushSyncQueue();
+        showBanner('ok', '✅ Đã cập nhật vào tem vừa quét & đẩy lên Sheet: NSX ' + formatLotDateDisplay(latest.nsx) + ' • HSD ' + formatLotDateDisplay(latest.hsd));
+      }
+    } catch (e) {
+      playBeep('error');
+      showBanner('error', 'Không xử lý được ảnh vừa chọn. Vui lòng thử lại!');
     }
   }
 
@@ -1357,7 +1956,7 @@
     });
   }
 
-  // Bộ giải mã EAN-13 thuần JavaScript (Tầng dự phòng số 3 cho mọi trình duyệt ĐT/PDA đời cũ không chạy được WASM)
+  // Bộ giải mã EAN-13 thuần JavaScript (Tầng dự phòng số 3 cho mọi trình duyệt ĐT/PDA đời cũ)
   const EAN13_L_MAP = {
     '3211': 0, '2221': 1, '2122': 2, '1411': 3, '1132': 4,
     '1231': 5, '1114': 6, '1312': 7, '1213': 8, '3112': 9
@@ -1366,7 +1965,7 @@
     '1123': 0, '1222': 1, '2212': 2, '1141': 3, '2311': 4,
     '1321': 5, '4111': 6, '2131': 7, '3121': 8, '2113': 9
   };
-  const EAN13_R_MAP = EAN13_L_MAP; // Cùng độ rộng 4 nhịp (Đen-Trắng-Đen-Trắng thay vì Trắng-Đen-Trắng-Đen)
+  const EAN13_R_MAP = EAN13_L_MAP;
   const EAN13_PARITY_MAP = {
     'LLLLLL': '0', 'LLGLGG': '1', 'LLGGLG': '2', 'LLGGGL': '3', 'LGLLGG': '4',
     'LGGLLG': '5', 'LGGGLL': '6', 'LGLGLG': '7', 'LGLGGL': '8', 'LGGLGL': '9'
@@ -1412,7 +2011,6 @@
   }
 
   function decodeEan13FromBitLine(bits, len) {
-    // Trích mảng độ dài các vạch liên tiếp [vạch_0, khoảng_1, vạch_2, ...] bắt đầu từ vạch đen (1)
     const runs = [];
     let idx = 0;
     while (idx < len && bits[idx] === 0) idx++;
@@ -1426,7 +2024,6 @@
       }
       runs.push(count);
     }
-    // EAN-13 chuẩn gồm 59 nhịp xen kẽ (3 đầu + 24 trái + 5 giữa + 24 phải + 3 cuối)
     if (runs.length < 59) return null;
     for (let s = 0; s <= runs.length - 59; s += 2) {
       const unit = (runs[s] + runs[s + 1] + runs[s + 2]) / 3;
@@ -1438,7 +2035,6 @@
       ) {
         continue;
       }
-      // Kiểm tra vạch ngăn giữa (s+27 .. s+31) và vạch kết thúc (s+56 .. s+58)
       const midUnit = (runs[s + 27] + runs[s + 28] + runs[s + 29] + runs[s + 30] + runs[s + 31]) / 5;
       if (Math.abs(midUnit - unit) > unit * 0.75) continue;
 
@@ -1489,7 +2085,6 @@
     const data = imgData.data;
     const votes = {};
 
-    // Quét 17 đường cắt ngang qua vùng tâm ảnh (cả chiều xuôi & chiều ngược 180 độ)
     const winHalf = Math.max(12, Math.floor(w / 28));
     const gray = new Uint8Array(w);
     const bits = new Uint8Array(w);
@@ -1527,18 +2122,32 @@
     return null;
   }
 
-  async function decodePhotoInBrowserWasm(file) {
-    // Bước 1: Đọc trực tiếp file gốc qua C++ WASM (~25-45ms, hỗ trợ xoay ngang/dọc 90 độ)
-    if (window.ZXingWASM && window.ZXingWASM.readBarcodes) {
+  async function decodePhotoInBrowserWasm(file, preloadedCleanCanvas) {
+    // Bước 1: Đọc trên khung ảnh sạch (trả về luôn tọa độ mã vạch khớp 100% với cleanCanvas cho OCR)
+    if (preloadedCleanCanvas && window.ZXingWASM && window.ZXingWASM.readBarcodesFromImageData) {
       try {
-        const direct = await window.ZXingWASM.readBarcodes(file, WASM_1D_OPTIONS);
-        if (direct && direct.length > 0 && direct[0].text) {
-          return direct[0].text;
+        const cCtx = preloadedCleanCanvas.getContext('2d', { willReadFrequently: true });
+        const cHits = await window.ZXingWASM.readBarcodesFromImageData(
+          cCtx.getImageData(0, 0, preloadedCleanCanvas.width, preloadedCleanCanvas.height),
+          WASM_1D_OPTIONS
+        );
+        if (cHits && cHits.length > 0 && cHits[0].text) {
+          return { code: cHits[0].text, position: cHits[0].position || null };
         }
       } catch (e) {}
     }
 
-    // Bước 2: Chuẩn hóa kích thước ảnh lớn 12MP-48MP + tăng tương phản + thử cả 3 tầng giải mã (Native + WASM + Pure JS)
+    // Bước 2: Đọc trực tiếp file gốc qua C++ WASM
+    if (window.ZXingWASM && window.ZXingWASM.readBarcodes) {
+      try {
+        const direct = await window.ZXingWASM.readBarcodes(file, WASM_1D_OPTIONS);
+        if (direct && direct.length > 0 && direct[0].text) {
+          return { code: direct[0].text, position: null };
+        }
+      } catch (e) {}
+    }
+
+    // Bước 3: Đa góc nghiêng + tăng tương phản + cả 3 tầng giải mã (Native + WASM + Pure JS)
     try {
       const bmp = await loadImageSourceForCanvas(file);
       const drawSource = bmp._el || bmp;
@@ -1586,7 +2195,7 @@
             const natHits = await nativeDetector.detect(canvas);
             if (natHits && natHits.length > 0 && natHits[0].rawValue) {
               if (bmp.close) bmp.close();
-              return String(natHits[0].rawValue).trim();
+              return { code: String(natHits[0].rawValue).trim(), position: null };
             }
           } catch (e) {}
         }
@@ -1597,7 +2206,7 @@
             const hits = await window.ZXingWASM.readBarcodesFromImageData(imgData, WASM_1D_OPTIONS);
             if (hits && hits.length > 0 && hits[0].text) {
               if (bmp.close) bmp.close();
-              return hits[0].text;
+              return { code: hits[0].text, position: null };
             }
           } catch (e) {}
         }
@@ -1605,7 +2214,7 @@
         const jsCode = decodeEan13PureJsFromImageData(imgData);
         if (jsCode) {
           if (bmp.close) bmp.close();
-          return jsCode;
+          return { code: jsCode, position: null };
         }
       }
       if (bmp.close) bmp.close();
@@ -1617,6 +2226,13 @@
   // =========================================================================
   // OFFLINE-FIRST QUEUE & GOOGLE SHEET AUTO-SYNC WHEN BACK ONLINE
   // =========================================================================
+  function setNavMiniDotState(stateClass) {
+    const mini = document.getElementById('navSyncMiniDot');
+    if (mini) {
+      mini.className = 'nav-mini-dot ' + stateClass;
+    }
+  }
+
   function updateSyncBadge() {
     const dot = document.getElementById('syncStatusDot');
     const txt = document.getElementById('syncStatusText');
@@ -1624,6 +2240,7 @@
 
     if (!navigator.onLine) {
       dot.className = 'sync-dot pending';
+      setNavMiniDotState('pending');
       txt.textContent = pendingOps.length > 0
         ? ('📴 Lưu máy (' + pendingOps.length + ' chờ)')
         : '📴 Đang Offline (Lưu máy)';
@@ -1632,22 +2249,26 @@
 
     if (!settings.sheetWebAppUrl) {
       dot.className = 'sync-dot';
-      txt.textContent = '⚙️ Kết nối GG Sheet';
+      setNavMiniDotState('');
+      txt.textContent = 'Kết nối GG Sheet';
       return;
     }
 
     if (syncInProgress) {
       dot.className = 'sync-dot pending';
-      txt.textContent = '🔄 Đang cập nhật...';
+      setNavMiniDotState('pending');
+      txt.textContent = 'Đang cập nhật...';
       return;
     }
 
     if (pendingOps.length > 0) {
       dot.className = 'sync-dot pending';
+      setNavMiniDotState('pending');
       txt.textContent = 'Chờ đẩy (' + pendingOps.length + ')';
     } else {
       dot.className = 'sync-dot ok';
-      txt.textContent = '🟢 Đã lưu GG Sheet';
+      setNavMiniDotState('ok');
+      txt.textContent = 'Đã lưu GG Sheet';
     }
   }
 
@@ -1709,6 +2330,7 @@
       const txt = document.getElementById('syncStatusText');
       if (dot && txt) {
         dot.className = !navigator.onLine ? 'sync-dot pending' : 'sync-dot err';
+        setNavMiniDotState(!navigator.onLine ? 'pending' : 'err');
         txt.textContent = !navigator.onLine
           ? ('📴 Lưu máy (' + pendingOps.length + ' chờ)')
           : ('Chờ mạng ổn định (' + pendingOps.length + ')');
@@ -1723,7 +2345,7 @@
 
   async function forceFullPushToSheet() {
     if (!settings.sheetWebAppUrl) {
-      openModal('sheetModal');
+      openSheetModalUI();
       return;
     }
     syncInProgress = true;
@@ -1743,12 +2365,12 @@
           saveSettings();
         }
         persistPendingOps();
-        showBanner('ok', 'Đã đồng bộ toàn bộ ' + records.length + ' tem & danh mục lên Google Sheet!');
+        showBanner('ok', 'Đã đồng bộ toàn bộ ' + records.length + ' tem (gồm NSX/HSD) lên Google Sheet!');
       } else {
         alert('Lỗi từ Google Sheet: ' + (res && res.error ? res.error : 'Không xác định'));
       }
     } catch (e) {
-      alert('Không kết nối được tới đường link Web App Google Sheet. Hãy kiểm tra quyền truy cập "Bất kỳ ai (Anyone)"!');
+      alert('Không kết nối được tới đường link Web App Google Sheet. Hãy kiểm tra sóng mạng Internet!');
     } finally {
       syncInProgress = false;
       updateSyncBadge();
@@ -1788,6 +2410,8 @@
             productCode: r.productCode,
             productName: (r.productName && r.productName !== '—') ? r.productName : getProductNameOrNull(r.productCode),
             grams: Math.round(Number(r.grams)),
+            nsx: normalizeDateVN(r.nsx) || '',
+            hsd: normalizeDateVN(r.hsd) || '',
             rawBarcode: r.rawBarcode || '',
             note: r.note || '',
             edited: Boolean(r.note)
@@ -1798,7 +2422,7 @@
         persistPendingOps();
         renderAll(false);
         closeModal('sheetModal');
-        showBanner('ok', 'Đã tải ' + records.length + ' dòng dữ liệu từ Google Sheet về máy thành công!');
+        showBanner('ok', 'Đã tải ' + records.length + ' dòng dữ liệu (gồm NSX/HSD) từ Google Sheet về máy!');
       }
     } catch (err) {
       alert('Không tải được dữ liệu từ Google Sheet: ' + (err.message || err));
@@ -1823,7 +2447,7 @@
   }
 
   // =========================================================================
-  // EXPORT CSV / EXCEL BACKUP ON DEVICE
+  // EXPORT CSV / EXCEL BACKUP ON DEVICE (CÓ ĐỦ CỘT NSX & HSD)
   // =========================================================================
   function exportCsvForExcel() {
     if (records.length === 0) {
@@ -1837,6 +2461,8 @@
       'Tên sản phẩm',
       'Mã sản phẩm',
       'Số ký tem vừa scan',
+      'NSX',
+      'HSD',
       'Tổng số tem đã scan',
       'Tổng số sản phẩm đã scan',
       'Tổng số ký đã scan',
@@ -1860,6 +2486,8 @@
         r.productName ? r.productName : '—',
         '="' + (r.productCode || '') + '"',
         (r.grams / 1000).toFixed(3),
+        formatLotDateDisplay(r.nsx),
+        formatLotDateDisplay(r.hsd),
         String(i + 1),
         String(distinctCount),
         (runningGrams / 1000).toFixed(3),
@@ -1956,8 +2584,6 @@
       }
     });
 
-    // Hỗ trợ 100% các dòng máy PDA công nghiệp (Zebra, Urovo, Sunmi, Honeywell, iData, Newland)
-    // kể cả các máy bắn trực tiếp chuỗi 13 số vào ô nhập mà KHÔNG gửi phím Enter cuối dòng
     input.addEventListener('input', function () {
       const raw = input.value || '';
       if (raw.indexOf('\n') !== -1 || raw.indexOf('\r') !== -1) {
@@ -2013,7 +2639,6 @@
       }, 20);
     });
 
-    // Bắt sự kiện dán (Broadcast/Clipboard mode trên một số dòng PDA nội địa) ngay cả khi con trỏ rời ô nhập
     window.addEventListener('paste', function (e) {
       const activeTag = document.activeElement ? document.activeElement.tagName : '';
       const activeId = document.activeElement ? document.activeElement.id : '';
@@ -2039,8 +2664,41 @@
       if (currentMode === 'pda') input.focus();
     });
 
+    // Sự kiện thanh gán NSX / HSD theo lô cho PDA
+    const pdaNsxInp = document.getElementById('pdaLotNsxInput');
+    const pdaHsdInp = document.getElementById('pdaLotHsdInput');
+    if (pdaNsxInp && pdaHsdInp) {
+      pdaNsxInp.addEventListener('input', refreshPdaLotClearBtn);
+      pdaHsdInp.addEventListener('input', refreshPdaLotClearBtn);
+      pdaNsxInp.addEventListener('blur', function () {
+        const c = normalizeDateVN(pdaNsxInp.value);
+        if (c) pdaNsxInp.value = c;
+        refreshPdaLotClearBtn();
+      });
+      pdaHsdInp.addEventListener('blur', function () {
+        const c = normalizeDateVN(pdaHsdInp.value);
+        if (c) pdaHsdInp.value = c;
+        refreshPdaLotClearBtn();
+      });
+    }
+    const btnReadLot = document.getElementById('btnReadLotPhoto');
+    if (btnReadLot) {
+      btnReadLot.addEventListener('click', function () {
+        dateOnlyTarget = 'pda_lot';
+        document.getElementById('hiddenDateOnlyImageInput').click();
+      });
+    }
+    const btnClearLot = document.getElementById('btnClearLotDates');
+    if (btnClearLot) {
+      btnClearLot.addEventListener('click', function () {
+        if (pdaNsxInp) pdaNsxInp.value = '';
+        if (pdaHsdInp) pdaHsdInp.value = '';
+        refreshPdaLotClearBtn();
+        if (currentMode === 'pda') input.focus();
+      });
+    }
+
     window.addEventListener('keydown', function (e) {
-      // Cho phép bấm phím cứng cò quét bên hông PDA (F9/F10) để chụp quét khi đang bật chế độ Camera
       if (currentMode === 'camera' && (e.code === 'F9' || e.code === 'F10')) {
         e.preventDefault();
         onShutterScanClick();
@@ -2072,7 +2730,6 @@
       }
     });
 
-    // Cài ứng dụng ra màn hình chính (1 chạm mở Offline ngay như phần mềm cài sẵn)
     const installBtn = document.getElementById('btnInstallPwa');
     window.addEventListener('beforeinstallprompt', function (e) {
       e.preventDefault();
@@ -2103,6 +2760,19 @@
       e.target.value = '';
     });
 
+    const btnModalDates = document.getElementById('btnModalReadDates');
+    if (btnModalDates) {
+      btnModalDates.addEventListener('click', function () {
+        dateOnlyTarget = 'modal';
+        document.getElementById('hiddenDateOnlyImageInput').click();
+      });
+    }
+    document.getElementById('hiddenDateOnlyImageInput').addEventListener('change', function (e) {
+      const file = e.target.files && e.target.files[0];
+      if (file) decodeDateOnlyImageFile(file);
+      e.target.value = '';
+    });
+
     document.querySelectorAll('.nav-item').forEach(function (navBtn) {
       navBtn.addEventListener('click', function () {
         const target = navBtn.dataset.tab;
@@ -2114,6 +2784,10 @@
         const scanTop = document.getElementById('scanTopSection');
         if (scanTop) {
           scanTop.style.display = (target === 'tabScan') ? 'block' : 'none';
+        }
+        const kpiSec = document.getElementById('kpiSummarySection');
+        if (kpiSec) {
+          kpiSec.style.display = (target === 'tabSettings' || target === 'tabCatalog') ? 'none' : 'grid';
         }
         if (target !== 'tabScan' && currentMode === 'camera') {
           stopCamera1DScanner();
@@ -2144,23 +2818,33 @@
 
     document.getElementById('btnConfirmDuplicate').addEventListener('click', function () {
       const code = pendingDuplicateCode;
+      const dates = pendingDuplicateDates;
       pendingDuplicateCode = null;
+      pendingDuplicateDates = null;
       closeModal('duplicateModal');
-      if (code) processSingleBarcode(code, 'ConfirmedDup', true);
+      if (code) processSingleBarcode(code, 'ConfirmedDup', true, dates);
     });
     document.getElementById('btnCancelDuplicate').addEventListener('click', function () {
       pendingDuplicateCode = null;
+      pendingDuplicateDates = null;
       closeModal('duplicateModal');
     });
 
     document.getElementById('btnOpenSheetModal').addEventListener('click', openSheetModalUI);
+    const btnSettingsCfg = document.getElementById('btnSettingsConfigSheet');
+    if (btnSettingsCfg) btnSettingsCfg.addEventListener('click', openSheetModalUI);
+    const btnSettingsSync = document.getElementById('btnSettingsForceSync');
+    if (btnSettingsSync) btnSettingsSync.addEventListener('click', forceFullPushToSheet);
+    const btnSettingsPull = document.getElementById('btnSettingsPullSheet');
+    if (btnSettingsPull) btnSettingsPull.addEventListener('click', pullFromGoogleSheet);
+
     document.getElementById('btnCopyAppsScript').addEventListener('click', function () {
       const code = window.GOOGLE_APPS_SCRIPT_CODE || '';
       navigator.clipboard.writeText(code).then(function () {
-        showBanner('ok', 'Đã sao chép Mã Kết Nối Google Sheet!');
+        showBanner('ok', 'Đã sao chép Mã Kết Nối Google Sheet (có NSX & HSD)!');
         document.getElementById('btnCopyAppsScript').textContent = '✅ Đã sao chép mã!';
         setTimeout(function () {
-          document.getElementById('btnCopyAppsScript').textContent = '📋 Bước 1: Sao chép Mã Kết Nối Google Sheet';
+          document.getElementById('btnCopyAppsScript').textContent = '📋 Sao chép Mã Kết Nối Google Sheet (Có NSX & HSD)';
         }, 3000);
       });
     });
@@ -2197,7 +2881,7 @@
         saveSettings();
         alert(
           'Đường link "docs.google.com/spreadsheets/..." bạn vừa dán là link MỞ XEM bảng tính (hệ thống đã tự lưu vào ô Link mở xem bên dưới).\n\n' +
-          'Để Google cho phép tự động ghi dữ liệu quét vào bảng tính này, bạn cần dán đường link có đuôi "/exec" (bắt đầu bằng https://script.google.com/macros/s/.../exec) tạo từ menu Tiện ích mở rộng -> Apps Script!'
+          'Để tự động ghi dữ liệu quét vào bảng tính, bạn cần dán đường link có đuôi "/exec" (bắt đầu bằng https://script.google.com/macros/s/.../exec)!'
         );
         return;
       }
@@ -2223,6 +2907,7 @@
 
     document.getElementById('btnExportExcel').addEventListener('click', exportCsvForExcel);
     document.getElementById('btnExportExcel2').addEventListener('click', exportCsvForExcel);
+
     function clearAllSessionRecords() {
       if (records.length === 0) {
         showBanner('warn', 'Danh sách hiện đang trống (0 tem)!');
@@ -2243,9 +2928,9 @@
 
     document.getElementById('btnClearSession').addEventListener('click', clearAllSessionRecords);
     const quickClearBtn = document.getElementById('btnQuickClearSession');
-    if (quickClearBtn) {
-      quickClearBtn.addEventListener('click', clearAllSessionRecords);
-    }
+    if (quickClearBtn) quickClearBtn.addEventListener('click', clearAllSessionRecords);
+    const settingsClearBtn = document.getElementById('btnSettingsClearSession');
+    if (settingsClearBtn) settingsClearBtn.addEventListener('click', clearAllSessionRecords);
 
     document.getElementById('btnAddCatalogItem').addEventListener('click', function () {
       const code = prompt('Nhập Mã sản phẩm 5 chữ số (ví dụ: 10040):');

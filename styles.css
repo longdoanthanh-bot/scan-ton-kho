@@ -34,24 +34,71 @@ html, body {
   overscroll-behavior-y: contain;
 }
 
-/* Header */
-.app-header {
+/* Offline Slim Top Bar (chỉ hiện khi mất mạng) */
+.offline-top-bar {
   position: sticky;
   top: 0;
-  z-index: 50;
-  background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
-  color: #fff;
-  padding: 10px 12px;
-  box-shadow: 0 2px 12px rgba(15, 41, 66, 0.25);
+  z-index: 55;
+  background: #7c2d12;
+  border-bottom: 1.5px solid #fb923c;
+  color: #ffedd5;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: center;
 }
 
-.header-top {
+/* Settings Hero Card (Chuyển từ đầu trang vào mục Cài Đặt cho gọn màn hình) */
+.settings-hero-card {
+  background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 14px rgba(15, 41, 66, 0.22);
+}
+
+.settings-hero-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.settings-hero-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  max-width: 760px;
-  margin: 0 auto;
+  gap: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  padding: 6px 8px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+}
+
+.settings-toggle-row input[type="checkbox"] {
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
 }
 
 .brand-title {
@@ -67,6 +114,7 @@ html, body {
   font-size: 11.5px;
   color: #bae6fd;
   font-weight: 500;
+  margin-top: 2px;
 }
 
 .sync-pill {
@@ -95,11 +143,24 @@ html, body {
 .sync-dot.pending { background: #facc15; box-shadow: 0 0 8px #facc15; }
 .sync-dot.err { background: #f87171; box-shadow: 0 0 8px #f87171; }
 
+.nav-mini-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #94a3b8;
+  margin-left: 3px;
+  vertical-align: middle;
+}
+.nav-mini-dot.ok { background: #16a34a; }
+.nav-mini-dot.pending { background: #eab308; }
+.nav-mini-dot.err { background: #dc2626; }
+
 /* Main Container */
 .app-container {
   max-width: 760px;
   margin: 0 auto;
-  padding: 10px 10px 84px;
+  padding: 8px 10px 84px;
 }
 
 /* 3 Big Summary KPI Cards */
@@ -261,6 +322,44 @@ html, body {
   margin-top: 8px;
   font-size: 12px;
   color: var(--muted);
+}
+
+.pda-lot-bar {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px dashed #cbd5e1;
+}
+
+.pda-lot-inputs {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.pda-lot-label {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--navy);
+  white-space: nowrap;
+}
+
+.lot-input {
+  flex: 1;
+  min-width: 96px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  font-weight: 700;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #f8fafc;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.lot-input:focus {
+  border-color: var(--primary);
+  background: #fff;
+  outline: none;
 }
 
 /* Camera Box (1D Striped Barcode ONLY) */
@@ -558,6 +657,32 @@ html, body {
   color: #15803d;
 }
 
+.detail-box-date {
+  background: #f0f9ff;
+  border-color: #bae6fd;
+}
+
+.detail-val-date {
+  font-size: 16.5px;
+  color: var(--navy);
+}
+
+.detail-val-date.hsd-accent {
+  color: #0369a1;
+}
+
+.scan-lot-badge {
+  display: inline-block;
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #0369a1;
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
 .latest-meta-row {
   display: flex;
   align-items: center;
@@ -754,7 +879,7 @@ html, body {
   background: #fff;
   border-top: 1.5px solid var(--border);
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   max-width: 760px;
   margin: 0 auto;
   box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.08);
@@ -763,8 +888,8 @@ html, body {
 .nav-item {
   border: none;
   background: transparent;
-  padding: 8px 4px 10px;
-  font-size: 11.5px;
+  padding: 7px 2px 9px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--muted);
   cursor: pointer;

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'scan-ton-kho-v7';
+const CACHE_NAME = 'scan-ton-kho-v8';
 const ASSETS = [
   './',
   './index.html',
@@ -9,7 +9,12 @@ const ASSETS = [
   './manifest.json',
   './icon-192.svg',
   './vendor/zxing_wasm_reader.js',
-  './vendor/zxing_reader.wasm'
+  './vendor/zxing_reader.wasm',
+  './vendor/ocr/tesseract.min.js',
+  './vendor/ocr/worker.min.js',
+  './vendor/ocr/tesseract-core-lstm.wasm.js',
+  './vendor/ocr/tesseract-core-simd-lstm.wasm.js',
+  './vendor/ocr/eng.traineddata.gz'
 ];
 
 self.addEventListener('install', function (event) {
@@ -63,7 +68,6 @@ self.addEventListener('fetch', function (event) {
   if (event.request.method !== 'GET') return;
 
   var url = event.request.url || '';
-  // Không lưu đệm các lệnh gọi đồng bộ trực tiếp lên Google Sheet hoặc API nội bộ
   if (
     url.indexOf('script.google.com') !== -1 ||
     url.indexOf('googleusercontent.com') !== -1 ||
@@ -72,14 +76,18 @@ self.addEventListener('fetch', function (event) {
     return;
   }
 
-  // Bộ giải mã C++ WASM: ưu tiên lấy tức thì từ bộ nhớ máy (0ms, hoạt động 100% khi mất mạng)
-  if (url.indexOf('.wasm') !== -1) {
+  // Các thư viện giải mã mã vạch C++ WASM & bộ đọc chữ NSX/HSD: ưu tiên lấy tức thì từ bộ nhớ máy (0ms, hoạt động 100% khi mất mạng)
+  if (
+    url.indexOf('/vendor/') !== -1 ||
+    url.indexOf('.wasm') !== -1 ||
+    url.indexOf('.traineddata.gz') !== -1
+  ) {
     event.respondWith(
       caches.match(event.request, { ignoreSearch: true }).then(function (cached) {
         return cached || fetch(event.request).then(function (netResp) {
           if (netResp && netResp.ok) {
             var copy = netResp.clone();
-            caches.open(CACHE_NAME).then(function (c) { c.put('./vendor/zxing_reader.wasm', copy); });
+            caches.open(CACHE_NAME).then(function (c) { c.put(event.request, copy); });
           }
           return netResp;
         });
@@ -90,7 +98,7 @@ self.addEventListener('fetch', function (event) {
 
   // Các tệp giao diện & danh mục 120 mã hàng:
   // Có mạng nhanh (< 2.5 giây) -> lấy bản mới nhất và cập nhật bộ nhớ máy;
-  // Mất mạng hoặc sóng kho lạnh yếu -> mở ngay lập tức từ bộ nhớ Offline (ignoreSearch=true)!
+  // Mất mạng hoặc sóng kho lạnh yếu -> mở ngay lập tức từ bộ nhớ Offline!
   event.respondWith(
     fetchWithTimeout(event.request, 2500).then(function (netResp) {
       if (netResp && netResp.ok && url.indexOf(self.location.origin) === 0) {
