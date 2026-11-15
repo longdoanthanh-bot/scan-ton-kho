@@ -56,7 +56,7 @@
   let pendingDuplicateDateCtx = null;
   let dateOnlyTarget = 'latest';
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v11';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v12';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // Camera, WASM, Live Pre-Lock Radar & Async Offline OCR state
@@ -69,6 +69,7 @@
   let syncHoldTimer = null;
   let dateHoldSafetyTimer = null;
   let reconcileInFlight = false;
+  let pendingSwReload = false;
   let mediaStream = null;
   let cameraActive = false;
   let torchEnabled = false;
@@ -82,6 +83,9 @@
   let radarLoopId = 0;
   let lastAutoSnappedCode = '';
   let lastAutoSnappedEpoch = 0;
+  let autoSnapStreakCode = '';
+  let autoSnapStreakCount = 0;
+  let autoSnapStreakLastAt = 0;
   let edgeClipHoldCode = '';
   let edgeClipHoldSince = 0;
 
@@ -244,13 +248,24 @@
     } catch (e) {}
   }
 
+  function checkPendingSwReload() {
+    if (!pendingSwReload) return;
+    if (singleScanActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) return;
+    pendingSwReload = false;
+    try {
+      if (sessionStorage.getItem('sw_reloaded_v12') === '1') return;
+      sessionStorage.setItem('sw_reloaded_v12', '1');
+    } catch (e) {}
+    window.location.reload();
+  }
+
   function registerAndAutoUpdateServiceWorker() {
     if (!('serviceWorker' in navigator)) return;
     if (!(location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
       return;
     }
     const hadPreviousController = Boolean(navigator.serviceWorker.controller);
-    navigator.serviceWorker.register('./sw.js?v=11', { updateViaCache: 'none' }).then(function (reg) {
+    navigator.serviceWorker.register('./sw.js?v=12', { updateViaCache: 'none' }).then(function (reg) {
       if (reg.waiting) {
         reg.waiting.postMessage('SKIP_WAITING');
       }
@@ -263,17 +278,21 @@
           }
         });
       });
-      setTimeout(function () { reg.update().catch(function () {}); }, 1200);
+      setTimeout(function () { reg.update().catch(function () {}); }, 900);
       document.addEventListener('visibilitychange', function () {
         if (!document.hidden) reg.update().catch(function () {});
       });
     }).catch(function () {});
 
     navigator.serviceWorker.addEventListener('controllerchange', function () {
-      if (!hadPreviousController || singleScanActive || activeDateReadsCount > 0) return;
+      if (!hadPreviousController) return;
+      if (singleScanActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) {
+        pendingSwReload = true;
+        return;
+      }
       try {
-        if (sessionStorage.getItem('sw_reloaded_v11') === '1') return;
-        sessionStorage.setItem('sw_reloaded_v11', '1');
+        if (sessionStorage.getItem('sw_reloaded_v12') === '1') return;
+        sessionStorage.setItem('sw_reloaded_v12', '1');
       } catch (e) {}
       window.location.reload();
     });
@@ -622,8 +641,12 @@
   }
 
   // =========================================================================
-  // BỘ ĐỌC TỰ ĐỘNG NSX & HSD TRÊN TEM MEATCOOL (100% OFFLINE + ĐA KHUNG CHỐNG RUNG & MỌI GÓC NGHIÊNG)
+  // BỘ ĐỌC TỰ ĐỘNG NSX & HSD TRÊN TEM MEATCOOL (BẢN v12 SIÊU TỐC: CHỐNG MỜ CẬN CẢNH, KHỬ SỌC MÀN HÌNH & TRIỆT TIÊU KẸT HÀNG ĐỢI)
   // =========================================================================
+  const OCR_NSX_PREFIX_RE = /N\s*[S58]\s*X|[S58]\s*X\s*:|N\s*[DĐ]\s*G|MFG|PROD|NGAY\s*SX/;
+  const OCR_HSD_PREFIX_RE = /H\s*[S58]\s*[DO0]|[S58]\s*[DO0]\s*:|H\s*[DO0]\s*:|EXP|HAN\s*SD/;
+  const OCR_ANY_DATE_PREFIX_RE = /N\s*[S58]\s*X|H\s*[S58]\s*[DO0]|[S58]\s*X\s*:|[S58]\s*[DO0]\s*:|H\s*[DO0]\s*:|N\s*[DĐ]\s*G|MFG|EXP|PROD|NGAY|HAN/;
+
   function parseOcrNsxHsdText(rawText) {
     const rawStr = String(rawText || '');
     if (!rawStr) return { nsx: '', hsd: '' };
@@ -633,9 +656,9 @@
       .replace(/([0-9.,\/:-])[Oo]([0-9.,\/:-])/g, '$10$2')
       .replace(/([0-9.,\/:-])[Oo]([0-9.,\/:-])/g, '$10$2')
       .replace(/([0-9])[Oo]\b/g, '$10')
-      .replace(/(^|[\s:])[Il|]([0-9][.,\/:-])/g, '$11$2')
-      .replace(/([.,\/:-])[Il|]([0-9])/g, '$11$2')
-      .replace(/([0-9])[Il|]([.,\/:-])/g, '$11$2');
+      .replace(/(^|[\s:])[Il|!](\s*[0-9][.,\/:-])/g, '$11$2')
+      .replace(/([.,\/:-]\s*)[Il|!]([0-9])/g, '$11$2')
+      .replace(/([0-9])[Il|!](\s*[.,\/:-])/g, '$11$2');
 
     const pad2 = function (n) { return n < 10 ? ('0' + n) : String(n); };
     const found = [];
@@ -657,8 +680,8 @@
       ) {
         return;
       }
-      const prefixCtx = text.slice(Math.max(0, matchIndex - 36), matchIndex + 4).toUpperCase();
-      if (requireLabelPrefix && !/N\s*S\s*X|H\s*S\s*D|S\s*X\s*:|S\s*D\s*:|MFG|EXP/.test(prefixCtx)) {
+      const prefixCtx = text.slice(Math.max(0, matchIndex - 40), matchIndex + 4).toUpperCase();
+      if (requireLabelPrefix && !OCR_ANY_DATE_PREFIX_RE.test(prefixCtx) && found.length === 0) {
         return;
       }
       found.push({
@@ -670,10 +693,16 @@
       });
     }
 
-    // Lượt A: Bắt chuẩn ngày 4 số năm có dấu chấm, phẩy, gạch chéo, gạch ngang, hai chấm hoặc khoảng trắng (VD: 12.11.2026)
-    const regexSep = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])[.,\/:\-\s]{1,2}(0?[1-9]|1[0-2])[.,\/:\-\s]{1,2}(20[23]\d)(?!\d)/g;
+    // Lượt A: Bắt chuẩn ngày 4 số năm có dấu chấm, phẩy, gạch chéo, gạch ngang, hai chấm hoặc khoảng trắng (kể cả có khoảng trắng hai bên dấu chấm: 12 . 11 . 2026)
+    const regexSep = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])[.,\/:\-\s]{1,3}(0?[1-9]|1[0-2])[.,\/:\-\s]{1,3}(20[23]\d)(?!\d)/g;
     let m;
     while ((m = regexSep.exec(text)) !== null) {
+      tryPushCandidate(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10), m.index, m[0].length, false);
+    }
+
+    // Lượt A2: Cứu trường hợp nếp nhăn bao bì sát sau chữ số năm tạo thêm 1 số nhiễu (VD: 12.11.20261) khi có dấu chấm/gạch rõ ràng cả hai bên
+    const regexDotSpeckle = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])\s*[.,\/-]\s*(0?[1-9]|1[0-2])\s*[.,\/-]\s*(20[23]\d)\d(?!\d)/g;
+    while ((m = regexDotSpeckle.exec(text)) !== null) {
       tryPushCandidate(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10), m.index, m[0].length, false);
     }
 
@@ -684,8 +713,14 @@
       tryPushCandidate(parseInt(m[1], 10), parseInt(m[3], 10), parseInt(m[5], 10), m.index, m[0].length, !hasAnySep);
     }
 
-    // Lượt C: Hỗ trợ năm 2 chữ số (VD: NSX: 12.11.26) chỉ khi đi kèm nhãn NSX/HSD và dấu chấm/gạch rõ ràng
-    const regexShortYear = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])[.\/-](0?[1-9]|1[0-2])[.\/-](2[4-9]|3[0-6])(?!\d)/g;
+    // Lượt C: Hỗ trợ định dạng năm-tháng-ngày yyyy.mm.dd / yyyy/mm/dd / yyyy-mm-dd
+    const regexYmd = /(?:^|[^\d])(20[23]\d)\s*[.,\/-]\s*(0?[1-9]|1[0-2])\s*[.,\/-]\s*(0?[1-9]|[12]\d|3[01])(?!\d)/g;
+    while ((m = regexYmd.exec(text)) !== null) {
+      tryPushCandidate(parseInt(m[3], 10), parseInt(m[2], 10), parseInt(m[1], 10), m.index, m[0].length, false);
+    }
+
+    // Lượt D: Hỗ trợ năm 2 chữ số (VD: NSX: 12.11.26) khi có dấu chấm/gạch rõ ràng và nhãn ngày đi kèm
+    const regexShortYear = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])\s*[.\/-]\s*(0?[1-9]|1[0-2])\s*[.\/-]\s*(2[4-9]|3[0-6])(?!\d)/g;
     while ((m = regexShortYear.exec(text)) !== null) {
       tryPushCandidate(parseInt(m[1], 10), parseInt(m[2], 10), 2000 + parseInt(m[3], 10), m.index, m[0].length, true);
     }
@@ -715,10 +750,10 @@
 
     // Chỉ đọc rõ được 1 ngày duy nhất -> kiểm tra nhãn NSX hay HSD đi kèm, tuyệt đối không tự đoán ngày còn lại!
     const single = unique[0];
-    if (/H\s*S\s*D|S\s*D\s*:|EXP/.test(single.prefixCtx)) {
+    if (OCR_HSD_PREFIX_RE.test(single.prefixCtx)) {
       return { nsx: '', hsd: single.str };
     }
-    if (/N\s*S\s*X|S\s*X\s*:|MFG/.test(single.prefixCtx)) {
+    if (OCR_NSX_PREFIX_RE.test(single.prefixCtx)) {
       return { nsx: single.str, hsd: '' };
     }
     return { nsx: '', hsd: '' };
@@ -773,6 +808,211 @@
     }
     oCtx.putImageData(img, pad, pad);
     return out;
+  }
+
+  // Khôi phục độ sắc nét cho chữ nhỏ & dấu chấm '.' khi điện thoại đưa sát 12-18cm (ngoài khoảng lấy nét tối thiểu) hoặc luồng hình 720p bị mờ
+  function sharpenDefocusedTextCanvas(srcCanvas) {
+    const w = srcCanvas.width;
+    const h = srcCanvas.height;
+    const out = document.createElement('canvas');
+    const pad = 22;
+    out.width = w + pad * 2;
+    out.height = h + pad * 2;
+    const oCtx = out.getContext('2d', { willReadFrequently: true });
+    oCtx.fillStyle = '#ffffff';
+    oCtx.fillRect(0, 0, out.width, out.height);
+    oCtx.drawImage(srcCanvas, pad, pad);
+
+    const img = oCtx.getImageData(pad, pad, w, h);
+    const d = img.data;
+    const total = w * h;
+    const lumArr = new Uint8Array(total);
+    const hist = new Uint32Array(256);
+
+    for (let i = 0, p = 0; i < total; i++, p += 4) {
+      const g = (d[p] * 77 + d[p + 1] * 150 + d[p + 2] * 29) >> 8;
+      lumArr[i] = g;
+      hist[g] += 1;
+    }
+
+    let sum = 0;
+    let high = 230;
+    for (let k = 255; k >= 0; k--) {
+      sum += hist[k];
+      if (sum >= total * 0.12) { high = k; break; }
+    }
+    const lowRatio = high < 115 ? 0.016 : 0.0015;
+    let low = 28;
+    sum = 0;
+    for (let k = 0; k < 256; k++) {
+      sum += hist[k];
+      if (sum >= total * lowRatio) { low = k; break; }
+    }
+    const span = Math.max(14, high - low);
+
+    const norm = new Float32Array(total);
+    for (let i = 0; i < total; i++) {
+      const v = ((lumArr[i] - low) * 255) / span;
+      norm[i] = v < 0 ? 0 : (v > 255 ? 255 : v);
+    }
+
+    const hBlur = new Float32Array(total);
+    for (let y = 0; y < h; y++) {
+      const ro = y * w;
+      for (let x = 0; x < w; x++) {
+        const xm2 = x > 1 ? x - 2 : 0;
+        const xm1 = x > 0 ? x - 1 : 0;
+        const xp1 = x + 1 < w ? x + 1 : w - 1;
+        const xp2 = x + 2 < w ? x + 2 : w - 1;
+        hBlur[ro + x] = (norm[ro + xm2] + norm[ro + xm1] * 3 + norm[ro + x] * 4 + norm[ro + xp1] * 3 + norm[ro + xp2]) / 12;
+      }
+    }
+
+    for (let y = 0; y < h; y++) {
+      const ym2 = (y > 1 ? y - 2 : 0) * w;
+      const ym1 = (y > 0 ? y - 1 : 0) * w;
+      const y0 = y * w;
+      const yp1 = (y + 1 < h ? y + 1 : h - 1) * w;
+      const yp2 = (y + 2 < h ? y + 2 : h - 1) * w;
+      for (let x = 0; x < w; x++) {
+        const idx = y0 + x;
+        const b = (hBlur[ym2 + x] + hBlur[ym1 + x] * 3 + hBlur[idx] * 4 + hBlur[yp1 + x] * 3 + hBlur[yp2 + x]) / 12;
+        const sv = Math.round(norm[idx] + 1.55 * (norm[idx] - b));
+        const clamped = sv < 0 ? 0 : (sv > 255 ? 255 : sv);
+        const p = idx * 4;
+        d[p] = clamped;
+        d[p + 1] = clamped;
+        d[p + 2] = clamped;
+        d[p + 3] = 255;
+      }
+    }
+    oCtx.putImageData(img, pad, pad);
+    return out;
+  }
+
+  // Khử sọc lưới điểm ảnh màn hình máy tính (LCD Moiré): lọc trung vị dọc 5 điểm khử sạch cả sọc xám trên giấy trắng lẫn khe đứt nét chữ, bảo toàn 100% dấu chấm '.' và khe hở chữ số 6!
+  function descreenLcdCanvas(srcCanvas) {
+    const w = srcCanvas.width;
+    const h = srcCanvas.height;
+    const tmp = document.createElement('canvas');
+    tmp.width = w;
+    tmp.height = h;
+    const ctx = tmp.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(srcCanvas, 0, 0);
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    const lum = new Uint8Array(w * h);
+    for (let i = 0, p = 0; i < lum.length; i++, p += 4) {
+      lum[i] = (d[p] * 77 + d[p + 1] * 150 + d[p + 2] * 29) >> 8;
+    }
+    const vals = new Uint8Array(5);
+    for (let y = 2; y < h - 2; y++) {
+      const ym2 = (y - 2) * w;
+      const ym1 = (y - 1) * w;
+      const y0 = y * w;
+      const yp1 = (y + 1) * w;
+      const yp2 = (y + 2) * w;
+      for (let x = 0; x < w; x++) {
+        vals[0] = lum[ym2 + x];
+        vals[1] = lum[ym1 + x];
+        vals[2] = lum[y0 + x];
+        vals[3] = lum[yp1 + x];
+        vals[4] = lum[yp2 + x];
+        // Sắp xếp chèn 5 phần tử siêu tốc lấy trung vị chính giữa
+        for (let a = 1; a < 5; a++) {
+          const key = vals[a];
+          let b = a - 1;
+          while (b >= 0 && vals[b] > key) {
+            vals[b + 1] = vals[b];
+            b--;
+          }
+          vals[b + 1] = key;
+        }
+        const v = vals[2];
+        const p = (y0 + x) * 4;
+        d[p] = v;
+        d[p + 1] = v;
+        d[p + 2] = v;
+        d[p + 3] = 255;
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+    return enhanceSoftGrayscaleCanvas(tmp);
+  }
+
+  // Phát hiện & khử tức thì sọc ngang chu kỳ màn hình (LCD) ngay ở tỷ lệ gốc 1.0x trước khi phóng to (0 chạm vào ảnh chụp giấy thường!)
+  function tryDescreenPeriodicScanlines1x(fullCanvas, cx, cy, angle, uMin, vMin, uSpan, vSpan, paperRgb) {
+    const rawW = Math.max(60, Math.round(uSpan));
+    const rawH = Math.max(40, Math.round(vSpan));
+    if (rawW > 1200 || rawH > 1200) return null;
+
+    const c1 = document.createElement('canvas');
+    c1.width = rawW;
+    c1.height = rawH;
+    const ctx1 = c1.getContext('2d', { willReadFrequently: true });
+    ctx1.fillStyle = paperRgb;
+    ctx1.fillRect(0, 0, rawW, rawH);
+    ctx1.save();
+    ctx1.translate(-uMin, -vMin);
+    ctx1.rotate(-angle);
+    ctx1.translate(-cx, -cy);
+    ctx1.drawImage(fullCanvas, 0, 0);
+    ctx1.restore();
+
+    const img = ctx1.getImageData(0, 0, rawW, rawH);
+    const d = img.data;
+    const x0 = Math.floor(rawW * 0.15);
+    const x1 = Math.max(x0 + 8, Math.floor(rawW * 0.85));
+    const y0 = Math.max(1, Math.floor(rawH * 0.12));
+    const y1 = Math.min(rawH - 2, Math.floor(rawH * 0.88));
+    if (y1 - y0 < 8) return null;
+
+    const rowMeans = new Float32Array(rawH);
+    const invW = 1 / (x1 - x0);
+    for (let y = y0 - 1; y <= y1 + 1; y++) {
+      let sum = 0;
+      const ro = y * rawW;
+      for (let x = x0; x < x1; x++) {
+        const p = (ro + x) * 4;
+        sum += (d[p] * 77 + d[p + 1] * 150 + d[p + 2] * 29) >> 8;
+      }
+      rowMeans[y] = sum * invW;
+    }
+
+    let spikeSum = 0;
+    let spikeCnt = 0;
+    for (let y = y0; y <= y1; y++) {
+      spikeSum += Math.abs(rowMeans[y] - 0.5 * (rowMeans[y - 1] + rowMeans[y + 1]));
+      spikeCnt++;
+    }
+    const avgSpike = spikeCnt > 0 ? (spikeSum / spikeCnt) : 0;
+    if (avgSpike <= 2.4) {
+      return null;
+    }
+
+    // Có sọc ngang màn hình rõ rệt -> lọc trung vị dọc 3 điểm ở đúng độ phân giải gốc 1.0x để xóa sạch 100% vạch sọc!
+    const lum = new Uint8Array(rawW * rawH);
+    for (let i = 0, p = 0; i < lum.length; i++, p += 4) {
+      lum[i] = (d[p] * 77 + d[p + 1] * 150 + d[p + 2] * 29) >> 8;
+    }
+    for (let y = 1; y < rawH - 1; y++) {
+      const ym1 = (y - 1) * rawW;
+      const yc = y * rawW;
+      const yp1 = (y + 1) * rawW;
+      for (let x = 0; x < rawW; x++) {
+        const a = lum[ym1 + x];
+        const b = lum[yc + x];
+        const c = lum[yp1 + x];
+        const med = a > b ? (b > c ? b : (a > c ? c : a)) : (a > c ? a : (b > c ? c : b));
+        const p = (yc + x) * 4;
+        d[p] = med;
+        d[p + 1] = med;
+        d[p + 2] = med;
+        d[p + 3] = 255;
+      }
+    }
+    ctx1.putImageData(img, 0, 0);
+    return c1;
   }
 
   function flattenIlluminationToCanvas(srcCanvas) {
@@ -897,8 +1137,8 @@
     const cy = (pos.topLeft.y + pos.topRight.y + pos.bottomRight.y + pos.bottomLeft.y) / 4;
 
     const margin = 8;
-    const pxDown = cx + (-0.24 * bw) * cosA + (0.94 * bw) * (-sinA);
-    const pyDown = cy + (-0.24 * bw) * sinA + (0.94 * bw) * cosA;
+    const pxDown = cx + (-0.24 * bw) * cosA + (1.14 * bw) * (-sinA);
+    const pyDown = cy + (-0.24 * bw) * sinA + (1.14 * bw) * cosA;
     return (
       pxDown >= margin &&
       pxDown <= (frameW - margin) &&
@@ -926,11 +1166,11 @@
       tiny.width = sw;
       tiny.height = sh;
       const tCtx = tiny.getContext('2d', { willReadFrequently: true });
-      const scaleX = sw / (1.25 * bw);
-      const scaleY = sh / (0.88 * bw);
+      const scaleX = sw / (1.36 * bw);
+      const scaleY = sh / (1.16 * bw);
       tCtx.save();
       tCtx.scale(scaleX, scaleY);
-      tCtx.translate(0.92 * bw, -0.38 * bw);
+      tCtx.translate(0.96 * bw, -0.36 * bw);
       tCtx.rotate(-angle);
       tCtx.translate(-cx, -cy);
       tCtx.drawImage(fullCanvas, 0, 0);
@@ -961,20 +1201,20 @@
     const dx = pos.topRight.x - pos.topLeft.x;
     const dy = pos.topRight.y - pos.topLeft.y;
     const bw = Math.hypot(dx, dy);
-    if (!bw || bw < 24) return null;
+    if (!bw || bw < 20) return null;
 
     const angle = Math.atan2(dy, dx) + (((extraDeg || 0) * Math.PI) / 180);
     const cx = (pos.topLeft.x + pos.topRight.x + pos.bottomRight.x + pos.bottomLeft.x) / 4;
     const cy = (pos.topLeft.y + pos.topRight.y + pos.bottomRight.y + pos.bottomLeft.y) / 4;
 
-    // Thu gọn mép phải uMax = +0.42 * bw để chừa khoảng trắng rộng sau chữ số năm 2026 (+0.18 * bw) nhưng tách sạch khỏi ô vuông góc phải (+0.51 * bw)!
+    // Thu gọn mép phải uMax = +0.42 * bw để chừa khoảng trắng rộng sau chữ số năm 2026 (+0.18 * bw), tách sạch khỏi ô vuông góc phải (+0.51 * bw) và nền tối bên ngoài tem!
     const uMin = ((customBounds && typeof customBounds.uMin === 'number') ? customBounds.uMin : -0.96) * bw;
     const uSpan = ((customBounds && typeof customBounds.uSpan === 'number') ? customBounds.uSpan : 1.38) * bw;
     const vMin = ((customBounds && typeof customBounds.vMin === 'number') ? customBounds.vMin : 0.34) * bw;
     const vSpan = ((customBounds && typeof customBounds.vSpan === 'number') ? customBounds.vSpan : 1.02) * bw;
 
-    // Phóng vùng chữ lên chuẩn 620px chiều ngang sọc (cao chữ ~31px — đúng điểm nét tối ưu của bộ đọc chữ, triệt tiêu nhòe viền chữ số 6)!
-    const scale = Math.min(3.2, Math.max(1.45, 620 / bw));
+    // Phóng vùng chữ lên chuẩn 620px chiều ngang sọc (cao chữ ~31px — đúng điểm nét tối ưu của bộ đọc chữ, giữ nguyên khe hở chữ số 6)!
+    const scale = Math.min(3.4, Math.max(1.45, 620 / bw));
     const outW = Math.max(180, Math.round(uSpan * scale));
     const outH = Math.max(90, Math.round(vSpan * scale));
 
@@ -982,8 +1222,15 @@
     roi.width = outW;
     roi.height = outH;
     const rCtx = roi.getContext('2d', { willReadFrequently: true });
-    rCtx.fillStyle = sampleBrightPaperRgb(fullCanvas, cx, cy);
+    const paperRgb = sampleBrightPaperRgb(fullCanvas, cx, cy);
+    rCtx.fillStyle = paperRgb;
     rCtx.fillRect(0, 0, outW, outH);
+
+    const clean1x = tryDescreenPeriodicScanlines1x(fullCanvas, cx, cy, angle, uMin, vMin, uSpan, vSpan, paperRgb);
+    if (clean1x) {
+      rCtx.drawImage(clean1x, 0, 0, clean1x.width, clean1x.height, 0, 0, outW, outH);
+      return roi;
+    }
 
     rCtx.save();
     rCtx.scale(scale, scale);
@@ -996,8 +1243,30 @@
     return roi;
   }
 
+  function cropCenterAimFromCanvas(srcCanvas) {
+    if (!srcCanvas) return null;
+    const cw = srcCanvas.width;
+    const ch = srcCanvas.height;
+    const sx = Math.round(cw * 0.06);
+    const sy = Math.round(ch * 0.16);
+    const sw = Math.max(160, Math.round(cw * 0.88));
+    const sh = Math.max(110, Math.round(ch * 0.68));
+    const maxOut = 1120;
+    const scale = Math.min(1.6, maxOut / Math.max(1, Math.max(sw, sh)));
+    const ow = Math.max(180, Math.round(sw * scale));
+    const oh = Math.max(110, Math.round(sh * scale));
+    const c = document.createElement('canvas');
+    c.width = ow;
+    c.height = oh;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, ow, oh);
+    ctx.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, ow, oh);
+    return c;
+  }
+
   function buildFullFrameDateCanvas(fullCanvas, degRotate) {
-    const maxDim = 1320;
+    const maxDim = 1280;
     const scale = Math.min(1.5, maxDim / Math.max(1, Math.max(fullCanvas.width, fullCanvas.height)));
     const w = Math.max(180, Math.round(fullCanvas.width * scale));
     const h = Math.max(110, Math.round(fullCanvas.height * scale));
@@ -1020,116 +1289,171 @@
   }
 
   function mergeDatePair(base, next) {
-    return {
-      nsx: (base && base.nsx) ? base.nsx : ((next && next.nsx) ? next.nsx : ''),
-      hsd: (base && base.hsd) ? base.hsd : ((next && next.hsd) ? next.hsd : '')
-    };
+    if (!next || (!next.nsx && !next.hsd)) {
+      return {
+        nsx: (base && base.nsx) ? base.nsx : '',
+        hsd: (base && base.hsd) ? base.hsd : ''
+      };
+    }
+    if (!base || (!base.nsx && !base.hsd)) {
+      return { nsx: next.nsx || '', hsd: next.hsd || '' };
+    }
+    if (next.nsx && next.hsd && (!base.nsx || !base.hsd)) {
+      return { nsx: next.nsx, hsd: next.hsd };
+    }
+    const mergedNsx = base.nsx || next.nsx || '';
+    const mergedHsd = base.hsd || next.hsd || '';
+    if (mergedNsx && mergedHsd) {
+      const pN = mergedNsx.split('/');
+      const pH = mergedHsd.split('/');
+      if (pN.length === 3 && pH.length === 3) {
+        const tN = new Date(parseInt(pN[2], 10), parseInt(pN[1], 10) - 1, parseInt(pN[0], 10)).getTime();
+        const tH = new Date(parseInt(pH[2], 10), parseInt(pH[1], 10) - 1, parseInt(pH[0], 10)).getTime();
+        if (tN > tH) {
+          return (next.nsx && next.hsd)
+            ? { nsx: next.nsx, hsd: next.hsd }
+            : { nsx: base.nsx || '', hsd: base.hsd || '' };
+        }
+      }
+    }
+    return { nsx: mergedNsx, hsd: mergedHsd };
   }
 
-  async function runQueuedOcrOnCanvas(worker, fullCanvas, barcodePos, allowTiltedFallback) {
+  async function runQueuedOcrOnCanvas(worker, fullCanvas, barcodePos, allowTiltedFallback, cancelState, rescueAimCropCanvas) {
     let best = { nsx: '', hsd: '' };
     const DATE_WHITELIST = '0123456789.:/-NSXHD ';
+    const isAborted = function () { return Boolean(cancelState && cancelState.aborted); };
+    const recordHit = function (resObj) {
+      const parsed = parseOcrNsxHsdText(resObj && resObj.data ? resObj.data.text : '');
+      best = mergeDatePair(best, parsed);
+      if (cancelState) cancelState.partial = best;
+      return Boolean(best.nsx && best.hsd);
+    };
 
-    // Lượt 1: Cắt gọn & xoay thẳng vùng NSX / HSD theo tọa độ dải mã vạch (~0.18s)
-    // Quy tắc vàng: Luôn ưu tiên bộ lọc xám mịn (enhanceSoftGrayscaleCanvas) ở cả 0° và ±7° TRƯỚC bộ khử bóng đổ (flattenIlluminationToCanvas)
-    // để giữ nguyên khe hở mảnh của chữ số 6 khi chụp từ xa (tránh dính nét biến 2026 thành 2028)!
+    if (isAborted()) return best;
+
+    // TRƯỜNG HỢP 1: ĐÃ BIẾT TỌA ĐỘ MÃ VẠCH (99% các ca quét Camera & Ảnh tem)
+    // Chỉ chạy trên các khung cắt nhỏ gọn quanh vùng ngày (~0.18s/lượt), TUYỆT ĐỐI không chạy khung khổng lồ 1320px gây treo điện thoại!
     if (barcodePos) {
       const rawRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0);
       const deepRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
-        uMin: -1.00,
-        uSpan: 1.40,
-        vMin: 0.32,
-        vSpan: 1.30
+        uMin: -0.96,
+        uSpan: 1.38,
+        vMin: 0.34,
+        vSpan: 1.24
       });
 
-      // 1A: Xám mịn độ phân giải chuẩn ở góc 0° và bù góc dư ±7°
+      // 1A: Xám mịn độ phân giải cao ở góc 0° (giữ nguyên khe hở chữ số 6 khi chụp xa 35-50cm)
       await worker.setParameters({
         tessedit_pageseg_mode: '6',
         tessedit_char_whitelist: DATE_WHITELIST
       });
-      if (rawRoi) {
-        const softGrayRoi = enhanceSoftGrayscaleCanvas(rawRoi);
-        const resSoft = await worker.recognize(softGrayRoi);
-        best = mergeDatePair(best, parseOcrNsxHsdText(resSoft && resSoft.data ? resSoft.data.text : ''));
-        if (best.nsx && best.hsd) return best;
+      if (rawRoi && !isAborted()) {
+        const resSoft = await worker.recognize(enhanceSoftGrayscaleCanvas(rawRoi));
+        if (recordHit(resSoft)) return best;
       }
 
-      const tiltMicroAngles = [-4, 4, -8, 8];
-      for (let tIdx = 0; tIdx < tiltMicroAngles.length; tIdx++) {
-        const adjRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, tiltMicroAngles[tIdx]);
-        if (adjRoi) {
-          const resAdj = await worker.recognize(enhanceSoftGrayscaleCanvas(adjRoi));
-          best = mergeDatePair(best, parseOcrNsxHsdText(resAdj && resAdj.data ? resAdj.data.text : ''));
-          if (best.nsx && best.hsd) return best;
-        }
+      // 1B: Khôi phục nét chữ mờ cận cảnh 12-18cm / Camera 720p (~0.18s)
+      if (rawRoi && !isAborted()) {
+        const resSharp = await worker.recognize(sharpenDefocusedTextCanvas(rawRoi));
+        if (recordHit(resSharp)) return best;
       }
 
-      if (deepRoi) {
-        const resDeepSoft = await worker.recognize(enhanceSoftGrayscaleCanvas(deepRoi));
-        best = mergeDatePair(best, parseOcrNsxHsdText(resDeepSoft && resDeepSoft.data ? resDeepSoft.data.text : ''));
-        if (best.nsx && best.hsd) return best;
-      }
-
-      // 1B: Khử bóng đổ cục bộ (cho tem bị bóng râm kho lạnh che một nửa hoặc cầm chúc góc phối cảnh sâu)
-      if (rawRoi) {
+      // 1C: Tách chữ 2 cột thưa (PSM 11) + Khử bóng đổ / Khử sọc màn hình máy tính & góc chúc kéo dài dọc 1.18x (~0.2s)
+      if ((rawRoi || deepRoi) && !isAborted()) {
         await worker.setParameters({
           tessedit_pageseg_mode: '11',
           tessedit_char_whitelist: DATE_WHITELIST
         });
-        const flatRoi = flattenIlluminationToCanvas(rawRoi);
-        const resFlat = await worker.recognize(flatRoi);
-        best = mergeDatePair(best, parseOcrNsxHsdText(resFlat && resFlat.data ? resFlat.data.text : ''));
-        if (best.nsx && best.hsd) return best;
-      }
-
-      if (deepRoi) {
+        if (rawRoi && !isAborted()) {
+          const resFlat = await worker.recognize(flattenIlluminationToCanvas(rawRoi));
+          if (recordHit(resFlat)) return best;
+        }
+        if (deepRoi && !isAborted()) {
+          const resDeepFlat = await worker.recognize(flattenIlluminationToCanvas(deepRoi));
+          if (recordHit(resDeepFlat)) return best;
+        }
         await worker.setParameters({
           tessedit_pageseg_mode: '6',
           tessedit_char_whitelist: DATE_WHITELIST
         });
-        const resDeepFlat = await worker.recognize(flattenIlluminationToCanvas(deepRoi));
-        best = mergeDatePair(best, parseOcrNsxHsdText(resDeepFlat && resDeepFlat.data ? resDeepFlat.data.text : ''));
-        if (best.nsx && best.hsd) return best;
       }
 
-      // 1C: Xoay 180° cho trường hợp túi thịt đặt lộn ngược đầu trên điện thoại Android!
-      const roi180 = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 180);
-      if (roi180) {
-        await worker.setParameters({
-          tessedit_pageseg_mode: '6',
-          tessedit_char_whitelist: DATE_WHITELIST
-        });
-        const res180 = await worker.recognize(enhanceSoftGrayscaleCanvas(roi180));
-        best = mergeDatePair(best, parseOcrNsxHsdText(res180 && res180.data ? res180.data.text : ''));
-        if (best.nsx && best.hsd) return best;
+      if (deepRoi && !isAborted()) {
+        const resDeepSoft = await worker.recognize(enhanceSoftGrayscaleCanvas(deepRoi));
+        if (recordHit(resDeepSoft)) return best;
+      }
+      if ((deepRoi || rawRoi) && !isAborted()) {
+        const resLcd = await worker.recognize(descreenLcdCanvas(deepRoi || rawRoi));
+        if (recordHit(resLcd)) return best;
+      }
+
+      // 1D: Bù góc nghiêng tay cầm dư [-4°, +4°, -8°, +8°] với bộ lọc xám mịn (chuẩn cho ảnh nghiêng 12°..20°)
+      const tiltMicroAngles = [-4, 4, -8, 8];
+      for (let tIdx = 0; tIdx < tiltMicroAngles.length; tIdx++) {
+        if (isAborted()) return best;
+        const adjRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, tiltMicroAngles[tIdx]);
+        if (adjRoi) {
+          const resAdj = await worker.recognize(enhanceSoftGrayscaleCanvas(adjRoi));
+          if (recordHit(resAdj)) return best;
+        }
+      }
+
+      // 1E: Túi hàng đặt lộn ngược đầu [180°] trên điện thoại Android
+      if (!isAborted()) {
+        const roi180 = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 180);
+        if (roi180) {
+          const res180 = await worker.recognize(enhanceSoftGrayscaleCanvas(roi180));
+          if (recordHit(res180)) return best;
+          if (!isAborted()) {
+            const res180Sharp = await worker.recognize(sharpenDefocusedTextCanvas(roi180));
+            if (recordHit(res180Sharp)) return best;
+          }
+        }
+      }
+
+      return best;
+    }
+
+    // TRƯỜNG HỢP 2: CHỤP BÙ NGÀY CẬN CẢNH (KHÔNG CÓ MÃ VẠCH TRONG KHUNG — NÚT "📷 BÙ NGÀY" HOẶC ẢNH CẬN CẢNH)
+    if (rescueAimCropCanvas && !isAborted()) {
+      await worker.setParameters({
+        tessedit_pageseg_mode: '6',
+        tessedit_char_whitelist: ''
+      });
+      if (isAborted()) return best;
+      const resAimSoft = await worker.recognize(enhanceSoftGrayscaleCanvas(rescueAimCropCanvas));
+      if (recordHit(resAimSoft)) return best;
+      if (!isAborted()) {
+        const resAimSharp = await worker.recognize(sharpenDefocusedTextCanvas(rescueAimCropCanvas));
+        if (recordHit(resAimSharp)) return best;
       }
     }
 
-    // Lượt 2: Mở lại toàn bộ bảng chữ cái cho khung ảnh rộng độ phân giải cao 1320px
+    if (isAborted()) return best;
     await worker.setParameters({
       tessedit_pageseg_mode: '11',
       tessedit_char_whitelist: ''
     });
+    if (isAborted()) return best;
     const full0 = buildFullFrameDateCanvas(fullCanvas, 0);
     const resFull0 = await worker.recognize(full0);
-    best = mergeDatePair(best, parseOcrNsxHsdText(resFull0 && resFull0.data ? resFull0.data.text : ''));
-    if (best.nsx && best.hsd) return best;
+    if (recordHit(resFull0)) return best;
 
-    // Lượt 3: Nếu ảnh cầm tay bị nghiêng hoặc ngược mà chưa đọc đủ ngày -> quét bổ sung góc nghiêng
-    if (allowTiltedFallback && (!best.nsx || !best.hsd)) {
-      const angles = barcodePos ? [-14, 14] : [-15, 15, 180];
+    if (allowTiltedFallback && (!best.nsx || !best.hsd) && !isAborted()) {
+      const angles = [-14, 14, 180];
       for (let i = 0; i < angles.length; i++) {
+        if (isAborted()) return best;
         const tiltedCanvas = buildFullFrameDateCanvas(fullCanvas, angles[i]);
         const resTilt = await worker.recognize(tiltedCanvas);
-        best = mergeDatePair(best, parseOcrNsxHsdText(resTilt && resTilt.data ? resTilt.data.text : ''));
-        if (best.nsx && best.hsd) return best;
+        if (recordHit(resTilt)) return best;
       }
     }
 
     return best;
   }
 
-  async function extractNsxHsdWithTimeout(fullCanvas, barcodePos, timeoutMs, allowTiltedFallback) {
+  async function extractNsxHsdWithTimeout(fullCanvas, barcodePos, timeoutMs, allowTiltedFallback, rescueAimCropCanvas) {
     if (!fullCanvas || !window.Tesseract) return { nsx: '', hsd: '' };
 
     // Chờ nạp bộ đọc chữ lần đầu riêng biệt (tối đa 10 giây nếu sóng 4G yếu lần đầu mở), không để ăn lẹm vào thời gian đọc ảnh!
@@ -1146,55 +1470,47 @@
     });
     if (!worker) return { nsx: '', hsd: '' };
 
-    // Bắt đầu đếm đồng hồ giới hạn thời gian BÊN TRONG hàng đợi (khi tới lượt xử lý tem đó),
-    // đảm bảo quét liên hoàn 5-10 túi thịt sát nhau trên điện thoại không bao giờ bị hết giờ oan khi xếp hàng!
-    const perItemBudgetMs = timeoutMs || 5200;
+    // Hàng đợi tuần tự tuyệt đối (0 bao giờ gọi chồng 2 lệnh lên cùng 1 worker!), kết hợp cờ hủy tức thì (cancelState.aborted)
+    const perItemBudgetMs = timeoutMs || (barcodePos ? 2600 : 4000);
     return new Promise(function (resolve) {
       let settled = false;
+      let itemTimer = null;
+      const cancelState = { aborted: false, partial: { nsx: '', hsd: '' } };
+
+      const finishCaller = function (val) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(outerSafetyTimer);
+        if (itemTimer) clearTimeout(itemTimer);
+        resolve(val || cancelState.partial || { nsx: '', hsd: '' });
+      };
+
       const outerSafetyTimer = setTimeout(function () {
-        if (!settled) {
-          settled = true;
-          resolve({ nsx: '', hsd: '' });
-        }
-      }, 24000);
+        cancelState.aborted = true;
+        finishCaller(cancelState.partial);
+      }, 9500);
 
       ocrQueuePromise = ocrQueuePromise.then(function () {
-        if (settled) return { nsx: '', hsd: '' };
-        return new Promise(function (innerResolve) {
-          let itemDone = false;
-          const itemTimer = setTimeout(function () {
-            if (!itemDone) {
-              itemDone = true;
-              innerResolve({ nsx: '', hsd: '' });
-            }
-          }, perItemBudgetMs);
+        if (settled || cancelState.aborted) return;
+        itemTimer = setTimeout(function () {
+          cancelState.aborted = true;
+          finishCaller(cancelState.partial);
+        }, perItemBudgetMs);
 
-          runQueuedOcrOnCanvas(worker, fullCanvas, barcodePos, Boolean(allowTiltedFallback)).then(function (res) {
-            if (!itemDone) {
-              itemDone = true;
-              clearTimeout(itemTimer);
-              innerResolve(res || { nsx: '', hsd: '' });
-            }
-          }).catch(function () {
-            if (!itemDone) {
-              itemDone = true;
-              clearTimeout(itemTimer);
-              innerResolve({ nsx: '', hsd: '' });
-            }
-          });
+        return runQueuedOcrOnCanvas(
+          worker,
+          fullCanvas,
+          barcodePos,
+          Boolean(allowTiltedFallback),
+          cancelState,
+          rescueAimCropCanvas || null
+        ).then(function (res) {
+          finishCaller(res);
+        }).catch(function () {
+          finishCaller(cancelState.partial);
         });
-      }).then(function (res) {
-        if (!settled) {
-          settled = true;
-          clearTimeout(outerSafetyTimer);
-          resolve(res || { nsx: '', hsd: '' });
-        }
       }).catch(function () {
-        if (!settled) {
-          settled = true;
-          clearTimeout(outerSafetyTimer);
-          resolve({ nsx: '', hsd: '' });
-        }
+        finishCaller(cancelState.partial);
       });
     });
   }
@@ -1317,7 +1633,7 @@
     dateHoldSafetyTimer = setTimeout(function () {
       dateHoldSafetyTimer = null;
       flushSyncQueue(false);
-    }, maxWaitMs || 5200);
+    }, maxWaitMs || 2800);
   }
 
   function clearDateReadSyncSafetyTimerIfIdle() {
@@ -1333,7 +1649,7 @@
       syncHoldTimer = null;
     }
     if (activeDateReadsCount > 0) {
-      armDateReadSyncSafetyTimer(5200);
+      armDateReadSyncSafetyTimer(2800);
       return;
     }
     clearDateReadSyncSafetyTimerIfIdle();
@@ -1344,7 +1660,7 @@
     syncHoldTimer = setTimeout(function () {
       syncHoldTimer = null;
       if (activeDateReadsCount > 0) {
-        armDateReadSyncSafetyTimer(5200);
+        armDateReadSyncSafetyTimer(2800);
         return;
       }
       flushSyncQueue(false);
@@ -1380,35 +1696,59 @@
         const item = candidates[i];
         let posUse = item.pos || null;
         if (!posUse) {
-          const det = await detectBarcodeCodeAndPosOnCanvas(item.canvas);
-          if (det && det.code && expectedBarcode && det.code !== expectedBarcode) {
-            continue;
+          const det = (i === 0 && !ctx.ignoreBarcodeMismatch)
+            ? (await detectBarcodeCodeAndPosOnCanvas(item.canvas))
+            : (await detectBarcodeQuickOnCanvas(item.canvas));
+          if (!ctx.ignoreBarcodeMismatch) {
+            if (det && det.code && expectedBarcode && det.code !== expectedBarcode) {
+              continue;
+            }
+            if (i > 0 && (!det || !det.pos)) {
+              // Khung phụ không thấy mã vạch (người dùng đã hạ máy khỏi tem) -> bỏ qua ngay 0ms, tuyệt đối không đọc nhầm bàn phím/nền bàn!
+              continue;
+            }
           }
           posUse = det ? det.pos : null;
         }
-        const dRes = await extractNsxHsdWithTimeout(item.canvas, posUse, 4800, Boolean(ctx.allowTilt));
+
+        const rescueCrop = (!posUse) ? (ctx.rescueAimCropCanvas || cropCenterAimFromCanvas(item.canvas)) : null;
+        const allowFullTilt = posUse ? Boolean(ctx.allowTilt) : Boolean(ctx.ignoreBarcodeMismatch && ctx.allowTilt);
+        const budgetMs = posUse ? 3800 : (ctx.ignoreBarcodeMismatch ? 3800 : 2400);
+        const dRes = await extractNsxHsdWithTimeout(item.canvas, posUse, budgetMs, allowFullTilt, rescueCrop);
         collected = mergeDatePair(collected, dRes);
         if (collected.nsx && collected.hsd) break;
       }
 
-      // Nếu khung đầu bị rung tay hoặc che khuất lúc bấm chụp mà Camera vẫn đang mở -> tự lấy thêm tối đa 2 khung kế tiếp
-      // (có kiểm tra mã vạch để cấm tuyệt đối việc đọc nhầm ngày của túi thịt tiếp theo sang túi trước!)
+      // Nếu khung đầu bị rung tay hoặc che khuất lúc bấm chụp mà Camera vẫn đang mở -> kiểm tra nhanh khung kế tiếp:
+      // - Nếu đang ở chế độ quét thường (!ignoreBarcodeMismatch) mà người dùng đã hạ điện thoại xuống bàn phím/nền bàn (không thấy mã vạch) -> ngắt ngay 0ms, KHÔNG BAO GIỜ treo "⏳ Đang đọc..."!
       if ((!collected.nsx || !collected.hsd) && ctx.liveVideo) {
-        for (let f = 0; f < 2; f++) {
+        const maxFollowUps = ctx.ignoreBarcodeMismatch ? 1 : 2;
+        for (let f = 0; f < maxFollowUps; f++) {
           if (!readingDateRecordIds[recordId]) break;
-          await new Promise(function (r) { setTimeout(r, f === 0 ? 115 : 155); });
+          await new Promise(function (r) { setTimeout(r, f === 0 ? 105 : 135); });
           if (!cameraActive || !mediaStream || !ctx.liveVideo || ctx.liveVideo.readyState < 2 || ctx.liveVideo.videoWidth <= 0) {
             break;
           }
           const nextCanvas = captureCleanFullVideoCanvas(ctx.liveVideo);
-          const nextDet = await detectBarcodeCodeAndPosOnCanvas(nextCanvas);
-          if (nextDet && nextDet.code && expectedBarcode && nextDet.code !== expectedBarcode) {
-            // Người dùng đã chuyển ống kính sang túi thịt khác -> dừng ngay để bảo vệ tính chính xác!
-            break;
+          const nextDet = await detectBarcodeQuickOnCanvas(nextCanvas);
+
+          if (!ctx.ignoreBarcodeMismatch) {
+            if (nextDet && nextDet.code && expectedBarcode && nextDet.code !== expectedBarcode) {
+              // Người dùng đã chuyển ống kính sang túi thịt khác -> dừng ngay để bảo vệ tính chính xác!
+              break;
+            }
+            if (!nextDet || !nextDet.pos) {
+              // Người dùng đã hạ điện thoại ra ngoài tem (VD: quay vào bàn phím máy tính) -> bỏ qua ngay, không chạy nhận diện chữ!
+              continue;
+            }
+            const nextDates = await extractNsxHsdWithTimeout(nextCanvas, nextDet.pos, 2200, false, null);
+            collected = mergeDatePair(collected, nextDates);
+          } else {
+            const rescueNextPos = nextDet ? nextDet.pos : null;
+            const rescueNextCrop = rescueNextPos ? null : cropCenterAimFromCanvas(nextCanvas);
+            const nextDates = await extractNsxHsdWithTimeout(nextCanvas, rescueNextPos, 3200, true, rescueNextCrop);
+            collected = mergeDatePair(collected, nextDates);
           }
-          const nextPos = nextDet ? nextDet.pos : null;
-          const nextDates = await extractNsxHsdWithTimeout(nextCanvas, nextPos, 4200, true);
-          collected = mergeDatePair(collected, nextDates);
           if (collected.nsx && collected.hsd) break;
         }
       }
@@ -1422,7 +1762,8 @@
     const rec = records.find(function (r) { return r.id === recordId; });
     if (!rec) {
       renderAll(false);
-      scheduleSyncFlush(40);
+      scheduleSyncFlush(35);
+      setTimeout(checkPendingSwReload, 120);
       return;
     }
 
@@ -1463,10 +1804,16 @@
           formatKg(rec.grams) + ' Kg | NSX: ' + formatLotDateDisplay(rec.nsx) + ' • HSD: ' + formatLotDateDisplay(rec.hsd)
         );
       }
+    } else if (!ctx.ignoreBarcodeMismatch && records.length > 0 && records[records.length - 1].id === recordId && (!rec.nsx || !rec.hsd)) {
+      showBanner(
+        'warn',
+        '⚠️ Đã lưu ' + (rec.productName || ('Mã ' + rec.productCode)) + ' (' + formatKg(rec.grams) + ' Kg) nhưng khuất dòng NSX/HSD — Soi vào ngày rồi bấm "📷 Bù ngày"!'
+      );
     }
 
     renderAll(false);
-    scheduleSyncFlush(50);
+    scheduleSyncFlush(35);
+    setTimeout(checkPendingSwReload, 120);
   }
 
   function commitParsedScan(parsed, datesObj, asyncDateContext) {
@@ -1524,9 +1871,11 @@
     renderAll(true);
 
     if (willReadDatesAsync) {
-      // Giữ nhịp đợi bộ đọc NSX/HSD hoàn tất để gộp trọn Mã + Số ký + NSX + HSD đẩy lên Google Sheet ngay trong lần đầu tiên!
-      armDateReadSyncSafetyTimer(5200);
-      fillRecordDatesInBackground(record.id, asyncDateContext);
+      // Giữ nhịp đợi bộ đọc NSX/HSD hoàn tất (~0.3s) để gộp trọn Mã + Số ký + NSX + HSD đẩy lên Google Sheet ngay trong lần đầu tiên!
+      armDateReadSyncSafetyTimer(2800);
+      setTimeout(function () {
+        fillRecordDatesInBackground(record.id, asyncDateContext);
+      }, 0);
     } else {
       scheduleSyncFlush(0);
     }
@@ -1991,14 +2340,23 @@
   // UNIVERSAL CAMERA 1D SCANNER + AUTOMATIC NSX/HSD EXTRACTION
   // =========================================================================
   async function requestUniversalCameraStream() {
+    // Ưu tiên độ phân giải cao nhất của cảm biến (4K / 2K / FullHD) KHÔNG ép tốc độ 30 khung/giây
+    // (tránh lỗi nhiều dòng iPhone/Android tự hạ xuống 720p mờ chữ khi bị ép 30 khung/giây!)
     const constraintsList = [
       {
         audio: false,
         video: {
           facingMode: { ideal: 'environment' },
+          width: { ideal: 3840 },
+          height: { ideal: 2160 }
+        }
+      },
+      {
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
           width: { ideal: 2560 },
-          height: { ideal: 1440 },
-          frameRate: { ideal: 30 }
+          height: { ideal: 1440 }
         }
       },
       {
@@ -2006,8 +2364,7 @@
         video: {
           facingMode: { ideal: 'environment' },
           width: { ideal: 1920 },
-          height: { ideal: 1080 },
-          frameRate: { ideal: 30 }
+          height: { ideal: 1080 }
         }
       },
       {
@@ -2015,8 +2372,7 @@
         video: {
           facingMode: { ideal: 'environment' },
           width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 30 }
+          height: { ideal: 720 }
         }
       },
       {
@@ -2178,8 +2534,8 @@
       iconEl.textContent = '📸';
       textEl.textContent = 'QUÉT';
       statusEl.textContent = settings.autoSnapCamera
-        ? '⚡ Tự chốt đang BẬT: Đưa tem vào khung là máy tự quét luôn!'
-        : '👆 Đưa tem vào khung → Bấm nút tròn chốt tức thì (tự đọc NSX/HSD ngầm)';
+        ? '⚡ Tự chốt v12 đang BẬT: Giữ trọn tem 0.1s trong khung là tự đọc mã + NSX/HSD!'
+        : '👆 Bản v12: Đưa trọn tem vào khung → Bấm nút tròn chốt tức thì (tự đọc NSX/HSD)';
     }
   }
 
@@ -2223,19 +2579,32 @@
     runSingleShotCameraScan();
   }
 
-  function captureCleanFullVideoCanvas(video) {
+  function captureVideoToCanvas(video, targetCanvas, maxDimLimit) {
     const vw = video.videoWidth;
     const vh = video.videoHeight;
-    const maxDim = 2400;
+    const maxDim = maxDimLimit || 2200;
     const scale = Math.min(1, maxDim / Math.max(1, Math.max(vw, vh)));
     const ow = Math.max(200, Math.round(vw * scale));
     const oh = Math.max(150, Math.round(vh * scale));
-    const c = document.createElement('canvas');
-    c.width = ow;
-    c.height = oh;
-    const ctx = c.getContext('2d', { willReadFrequently: true });
+    const c = targetCanvas || document.createElement('canvas');
+    if (c.width !== ow) c.width = ow;
+    if (c.height !== oh) c.height = oh;
+    const ctx = c.getContext('2d');
     ctx.drawImage(video, 0, 0, vw, vh, 0, 0, ow, oh);
     return c;
+  }
+
+  function cloneCanvas(srcCanvas) {
+    const c = document.createElement('canvas');
+    c.width = srcCanvas.width;
+    c.height = srcCanvas.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(srcCanvas, 0, 0);
+    return c;
+  }
+
+  function captureCleanFullVideoCanvas(video) {
+    return captureVideoToCanvas(video, null, 2200);
   }
 
   function getVisibleAimRectInVideo(video, expandFrac) {
@@ -2422,7 +2791,11 @@
   }
 
   async function tryDecodeRegionOnCanvas(workCanvas, workCtx, src, sx, sy, sw, sh, angleDeg, maxDim, padPx, doSharpen, useNative, needPosOnly) {
-    const ratio = Math.min(1, (maxDim || 1900) / Math.max(1, Math.max(sw, sh)));
+    const maxSide = Math.max(1, Math.max(sw, sh));
+    const minSide = Math.max(1, Math.min(sw, sh));
+    const ratio = (doSharpen && minSide < 820)
+      ? Math.min(2.0, 1080 / minSide)
+      : Math.min(1, (maxDim || 1900) / maxSide);
     const dw = Math.max(180, Math.round(sw * ratio));
     const dh = Math.max(110, Math.round(sh * ratio));
     const pad = padPx || 22;
@@ -2502,19 +2875,74 @@
       } catch (e) {}
     }
 
-    if (needPosOnly) return null;
-
     const jsHit = decodeEan13PureJsFromImageData(imgData);
-    if (jsHit) {
+    if (jsHit && jsHit.code) {
+      if (needPosOnly && !jsHit.pos) return null;
       return {
-        code: jsHit,
-        posOnWork: null,
+        code: jsHit.code,
+        posOnWork: jsHit.pos || null,
+        fromPureJs: true,
+        isFlatJs: Boolean(jsHit.isFlat),
         dw: dw,
         dh: dh,
         pad: pad
       };
     }
 
+    return null;
+  }
+
+  // Kiểm tra nhanh có mã vạch trong khung hình tiếp theo hay không (<25ms — dùng để ngắt tức thì khi người dùng vừa hạ điện thoại xuống bàn phím!)
+  async function detectBarcodeQuickOnCanvas(canvas) {
+    if (!canvas) return null;
+    const cw = canvas.width;
+    const ch = canvas.height;
+
+    if (nativeDetector) {
+      try {
+        const natHits = await nativeDetector.detect(canvas);
+        if (natHits && natHits.length > 0) {
+          for (let k = 0; k < natHits.length; k++) {
+            const rawV = String(natHits[k].rawValue || '').trim();
+            if (parseSingle13DigitScaleBarcode(rawV).ok) {
+              return {
+                code: rawV,
+                pos: convertCornerPointsToPos(natHits[k].cornerPoints, 1, 1)
+              };
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    const rotCanvas = document.createElement('canvas');
+    const rotCtx = rotCanvas.getContext('2d', { willReadFrequently: true });
+    const quickPlans = [
+      { crop: 1.0, deg: 0, sharp: false },
+      { crop: 1.0, deg: 0, sharp: true },
+      { crop: 0.56, deg: 0, sharp: true }
+    ];
+
+    for (let i = 0; i < quickPlans.length; i++) {
+      const p = quickPlans[i];
+      const sw = Math.max(120, Math.round(cw * p.crop));
+      const sh = Math.max(90, Math.round(ch * p.crop));
+      const sx = Math.round((cw - sw) / 2);
+      const sy = Math.round((ch - sh) / 2);
+      try {
+        const hit = await tryDecodeRegionOnCanvas(
+          rotCanvas, rotCtx, canvas, sx, sy, sw, sh, p.deg, 1750, 20, p.sharp, false, true
+        );
+        if (hit && hit.posOnWork) {
+          return {
+            code: hit.code || '',
+            pos: mapPositionToTargetCanvas(
+              hit.posOnWork, hit.dw, hit.dh, p.deg, sx, sy, sw, sh, cw, ch, cw, ch, hit.pad
+            )
+          };
+        }
+      } catch (e) {}
+    }
     return null;
   }
 
@@ -2540,7 +2968,6 @@
       } catch (e) {}
     }
 
-    if (!window.ZXingWASM || !window.ZXingWASM.readBarcodesFromImageData) return null;
     const rotCanvas = document.createElement('canvas');
     const rotCtx = rotCanvas.getContext('2d', { willReadFrequently: true });
     const plans = [
@@ -2558,6 +2985,7 @@
       { crop: 1.0, deg: 90, sharp: true }
     ];
 
+    let pureJsFallback = null;
     for (let i = 0; i < plans.length; i++) {
       const p = plans[i];
       const sw = Math.max(120, Math.round(cw * p.crop));
@@ -2569,16 +2997,26 @@
           rotCanvas, rotCtx, canvas, sx, sy, sw, sh, p.deg, 1850, 22, p.sharp, false, true
         );
         if (hit && hit.posOnWork) {
-          return {
+          const mapped = {
             code: hit.code || '',
             pos: mapPositionToTargetCanvas(
               hit.posOnWork, hit.dw, hit.dh, p.deg, sx, sy, sw, sh, cw, ch, cw, ch, hit.pad
             )
           };
+          if (!hit.fromPureJs) {
+            return mapped;
+          }
+          if (!pureJsFallback) {
+            pureJsFallback = mapped;
+            pureJsFallback.isFlat = Boolean(hit.isFlatJs);
+          }
+        }
+        if (pureJsFallback && pureJsFallback.isFlat && i >= 1) {
+          return pureJsFallback;
         }
       } catch (e) {}
     }
-    return null;
+    return pureJsFallback;
   }
 
   async function detectBarcodePositionOnCanvas(canvas) {
@@ -2589,6 +3027,7 @@
   function startLivePreLockLoop() {
     const myLoopId = ++radarLoopId;
     const video = document.getElementById('cameraVideo');
+    const radarFrameCanvas = document.createElement('canvas');
     const workCanvas = document.createElement('canvas');
     const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
     let tick = 0;
@@ -2600,14 +3039,20 @@
         tick += 1;
         const vw = video.videoWidth;
         const vh = video.videoHeight;
+
+        // ĐÓNG BĂNG KHUNG HÌNH TRƯỚC KHI GIẢI MÃ MÃ VẠCH -> Sai số dịch chuyển tay bằng 0.00px tuyệt đối!
+        captureVideoToCanvas(video, radarFrameCanvas, 1680);
+        const fw = radarFrameCanvas.width;
+        const fh = radarFrameCanvas.height;
+
         let foundCode = null;
         let foundParsed = null;
-        let foundPosInVideo = null;
+        let foundPosOnFrame = null;
 
-        // 1. Thử bộ giải mã phần cứng trực tiếp trên luồng hình gốc (~3ms)
+        // 1. Thử bộ giải mã phần cứng trực tiếp trên khung đóng băng (~3ms)
         if (nativeDetector) {
           try {
-            const vHits = await nativeDetector.detect(video);
+            const vHits = await nativeDetector.detect(radarFrameCanvas);
             if (vHits && vHits.length > 0) {
               for (let k = 0; k < vHits.length; k++) {
                 const raw = String(vHits[k].rawValue || '').trim();
@@ -2615,7 +3060,7 @@
                 if (chk.ok) {
                   foundCode = raw;
                   foundParsed = chk;
-                  foundPosInVideo = convertCornerPointsToPos(vHits[k].cornerPoints, 1, 1);
+                  foundPosOnFrame = convertCornerPointsToPos(vHits[k].cornerPoints, 1, 1);
                   break;
                 }
               }
@@ -2623,15 +3068,17 @@
           } catch (e) {}
         }
 
-        // 2. Xoay vòng quét độ phân giải gốc 1:1 (cận cảnh, cự ly xa 45cm, thiếu sáng, cầm nghiêng)
+        // 2. Xoay vòng quét độ phân giải cao trên cùng khung đóng băng (cận cảnh, cự ly xa 45cm, thiếu sáng, cầm nghiêng)
         if (!foundCode && cameraActive && !singleScanActive && radarLoopId === myLoopId) {
           const vis = getVisibleAimRectInVideo(video, 0.08);
+          const scaleX = fw / Math.max(1, vw);
+          const scaleY = fh / Math.max(1, vh);
           const alreadyLockedFresh = Boolean(livePreLock && (Date.now() - livePreLock.lockedAt) < 420);
           const modeIdx = alreadyLockedFresh ? (tick % 2) : (tick % 5);
-          let rx = vis.sx;
-          let ry = vis.sy;
-          let rw = vis.sw;
-          let rh = vis.sh;
+          let rx = Math.round(vis.sx * scaleX);
+          let ry = Math.round(vis.sy * scaleY);
+          let rw = Math.max(120, Math.round(vis.sw * scaleX));
+          let rh = Math.max(90, Math.round(vis.sh * scaleY));
           let deg = 0;
           let doSharp = true;
 
@@ -2639,18 +3086,25 @@
             doSharp = false;
           } else if (modeIdx === 2) {
             // Phóng tâm quang học giữ nguyên điểm ảnh gốc cho tem đặt ở xa 35-50cm
-            rw = Math.max(180, Math.round(vis.sw * 0.56));
-            rh = Math.max(120, Math.round(vis.sh * 0.56));
-            rx = vis.sx + Math.round((vis.sw - rw) / 2);
-            ry = vis.sy + Math.round((vis.sh - rh) / 2);
+            const zw = Math.max(160, Math.round(rw * 0.56));
+            const zh = Math.max(110, Math.round(rh * 0.56));
+            rx = rx + Math.round((rw - zw) / 2);
+            ry = ry + Math.round((rh - zh) / 2);
+            rw = zw;
+            rh = zh;
           } else if (modeIdx === 3) {
             deg = -11;
           } else if (modeIdx === 4) {
             deg = 11;
           }
 
+          rx = Math.max(0, Math.min(fw - 10, rx));
+          ry = Math.max(0, Math.min(fh - 10, ry));
+          rw = Math.max(10, Math.min(fw - rx, rw));
+          rh = Math.max(10, Math.min(fh - ry, rh));
+
           const hit = await tryDecodeRegionOnCanvas(
-            workCanvas, workCtx, video, rx, ry, rw, rh, deg, 1650, 22, doSharp, false
+            workCanvas, workCtx, radarFrameCanvas, rx, ry, rw, rh, deg, 1650, 22, doSharp, false
           );
           if (hit && hit.code) {
             const chk = parseSingle13DigitScaleBarcode(hit.code);
@@ -2658,8 +3112,8 @@
               foundCode = hit.code;
               foundParsed = chk;
               if (hit.posOnWork) {
-                foundPosInVideo = mapPositionToTargetCanvas(
-                  hit.posOnWork, hit.dw, hit.dh, deg, rx, ry, rw, rh, vw, vh, vw, vh, hit.pad
+                foundPosOnFrame = mapPositionToTargetCanvas(
+                  hit.posOnWork, hit.dw, hit.dh, deg, rx, ry, rw, rh, fw, fh, fw, fh, hit.pad
                 );
               }
             }
@@ -2667,36 +3121,37 @@
         }
 
         if (foundCode && foundParsed && cameraActive && !singleScanActive && radarLoopId === myLoopId) {
-          const snapCanvas = captureCleanFullVideoCanvas(video);
-          const mappedPos = foundPosInVideo
-            ? convertCornerPointsToPos(
-                [foundPosInVideo.topLeft, foundPosInVideo.topRight, foundPosInVideo.bottomRight, foundPosInVideo.bottomLeft],
-                snapCanvas.width / vw,
-                snapCanvas.height / vh
-              )
-            : null;
-          const dateInFrame = hasDateZoneInsideFrame(mappedPos, snapCanvas.width, snapCanvas.height);
-          const sharpness = measureDateZoneSharpness(snapCanvas, mappedPos);
+          const mappedPos = foundPosOnFrame;
+          const dateInFrame = hasDateZoneInsideFrame(mappedPos, fw, fh);
+          const sharpness = measureDateZoneSharpness(radarFrameCanvas, mappedPos);
           const frameScore = (dateInFrame ? 1000 : 0) + sharpness;
 
-          // Nếu trong 0.58 giây vừa qua đã bắt được một khung sắc nét thấy trọn cả vùng NSX/HSD của cùng tem này,
-          // giữ lại khung tốt nhất đó (không để cú giật tay lúc bấm nút đè khung mờ/mất góc lên khung nét!)
+          const nowTick = Date.now();
+          if (foundCode === autoSnapStreakCode && (nowTick - autoSnapStreakLastAt) < 900) {
+            autoSnapStreakCount += 1;
+          } else {
+            autoSnapStreakCode = foundCode;
+            autoSnapStreakCount = 1;
+          }
+          autoSnapStreakLastAt = nowTick;
+
+          // Giữ lại khung sắc nét nhất thấy trọn cả vùng NSX/HSD của cùng tem này (chỉ nhân bản khung hình khi thực sự cần cập nhật!)
           if (
             livePreLock &&
             livePreLock.code === foundCode &&
-            (Date.now() - livePreLock.lockedAt) < 580 &&
-            (livePreLock.frameScore || 0) > frameScore + 2.5
+            (nowTick - livePreLock.lockedAt) < 580 &&
+            (livePreLock.frameScore || 0) > frameScore + 1.8
           ) {
-            livePreLock.lockedAt = Date.now();
+            livePreLock.lockedAt = nowTick;
           } else {
             livePreLock = {
               code: foundCode,
               parsed: foundParsed,
-              frameCanvas: snapCanvas,
+              frameCanvas: cloneCanvas(radarFrameCanvas),
               barcodePos: mappedPos,
               dateInFrame: dateInFrame,
               frameScore: frameScore,
-              lockedAt: Date.now()
+              lockedAt: nowTick
             };
           }
 
@@ -2707,9 +3162,9 @@
           if (!livePreLock.dateInFrame) {
             if (edgeClipHoldCode !== foundCode) {
               edgeClipHoldCode = foundCode;
-              edgeClipHoldSince = Date.now();
+              edgeClipHoldSince = nowTick;
             }
-            if ((Date.now() - edgeClipHoldSince) < 950) {
+            if ((nowTick - edgeClipHoldSince) < 950) {
               holdAutoSnapForDates = true;
             }
           } else {
@@ -2717,15 +3172,18 @@
             edgeClipHoldSince = 0;
           }
 
+          // Chế độ ⚡ Tự chốt: Đợi đúng 2 nhịp bắt nét liên tiếp (~0.09 giây) để tay dừng lướt -> chữ NSX/HSD nét căng không bị nhòe!
           if (
             settings.autoSnapCamera &&
+            autoSnapStreakCount >= 2 &&
             !holdAutoSnapForDates &&
-            Date.now() >= shutterLockUntil &&
-            !(foundCode === lastAutoSnappedCode && (Date.now() - lastAutoSnappedEpoch) < 4200)
+            nowTick >= shutterLockUntil &&
+            !(foundCode === lastAutoSnappedCode && (nowTick - lastAutoSnappedEpoch) < 4200)
           ) {
             lastAutoSnappedCode = foundCode;
-            lastAutoSnappedEpoch = Date.now();
-            shutterLockUntil = Date.now() + 650;
+            lastAutoSnappedEpoch = nowTick;
+            autoSnapStreakCount = 0;
+            shutterLockUntil = nowTick + 650;
             const snapUse = livePreLock;
             livePreLock = null;
             setShutterUIState(
@@ -2751,24 +3209,33 @@
               : ('🟢 Đã bắt nét: ' + (foundParsed.productName || ('Mã ' + foundParsed.productCode)) +
                 ' (' + formatKg(foundParsed.grams) + ' Kg) — Bấm nút tròn chốt ngay!');
           }
-        } else if (livePreLock && (Date.now() - livePreLock.lockedAt) > 680) {
-          livePreLock = null;
-          const viewportBox = document.getElementById('cameraViewportBox');
-          if (viewportBox && viewportBox.classList.contains('is-prelocked')) {
-            viewportBox.classList.remove('is-prelocked');
-            if (!singleScanActive && !viewportBox.classList.contains('is-captured')) {
-              setShutterUIState('ready');
+        } else {
+          if ((Date.now() - autoSnapStreakLastAt) > 450) {
+            autoSnapStreakCount = 0;
+            autoSnapStreakCode = '';
+          }
+          if (livePreLock && (Date.now() - livePreLock.lockedAt) > 680) {
+            livePreLock = null;
+            const viewportBox = document.getElementById('cameraViewportBox');
+            if (viewportBox && viewportBox.classList.contains('is-prelocked')) {
+              viewportBox.classList.remove('is-prelocked');
+              if (!singleScanActive && !viewportBox.classList.contains('is-captured')) {
+                setShutterUIState('ready');
+              }
             }
           }
         }
       }
 
       if (cameraActive && mediaStream && radarLoopId === myLoopId) {
-        setTimeout(step, 85);
+        const nextDelay = (settings.autoSnapCamera && autoSnapStreakCount === 1)
+          ? 70
+          : (livePreLock ? 145 : 95);
+        setTimeout(step, nextDelay);
       }
     }
 
-    setTimeout(step, 60);
+    setTimeout(step, 55);
   }
 
   async function runSingleShotCameraScan() {
@@ -2781,12 +3248,7 @@
       livePreLock = null;
       shutterLockUntil = Date.now() + 180;
 
-      // Chụp thêm 1 khung tức thì ngay lúc bấm (2400px) và xếp hạng khung sắc nét nhất lên đầu để đọc NSX/HSD bách phát bách trúng!
       const candidateFrames = [{ canvas: snap.frameCanvas, pos: snap.barcodePos, score: snap.frameScore || 500 }];
-      if (video && video.readyState >= 2 && video.videoWidth > 0) {
-        const tapCanvas = captureCleanFullVideoCanvas(video);
-        candidateFrames.push({ canvas: tapCanvas, pos: null, score: 400 });
-      }
 
       setShutterUIState('captured');
       handleBarcodeInput(snap.code, 'Camera', null, {
@@ -2808,6 +3270,7 @@
     singleScanActive = true;
     setShutterUIState('scanning');
 
+    const frozenCanvas = document.createElement('canvas');
     const workCanvas = document.createElement('canvas');
     const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
 
@@ -2815,7 +3278,7 @@
     let attempt = 0;
     let lastInvalidError = null;
 
-    // 10 cấu hình quét siêu tốc giữ trọn độ phân giải cảm biến: tâm chuẩn, tăng nét thiếu sáng, phóng xa 48%, toàn khung, nghiêng ±10°, ±21°, ±34°, dọc 90°
+    // 11 cấu hình quét siêu tốc trên khung đóng băng (0.00px lệch tọa độ): tâm chuẩn, tăng nét thiếu sáng, phóng xa 50%, toàn khung, nghiêng ±10°, ±21°, ±34°, dọc 90°
     const sweepPlan = [
       { mode: 'aim', deg: 0, sharp: false, nativeFirst: true },
       { mode: 'aim', deg: 0, sharp: true, nativeFirst: false },
@@ -2834,49 +3297,62 @@
       if (video && video.readyState >= 2 && video.videoWidth > 0) {
         const vw = video.videoWidth;
         const vh = video.videoHeight;
+        captureVideoToCanvas(video, frozenCanvas, 2200);
+        const fw = frozenCanvas.width;
+        const fh = frozenCanvas.height;
+
         const cfg = sweepPlan[attempt % sweepPlan.length];
         attempt += 1;
 
         let candidate = null;
-        let posInVideo = null;
+        let posOnFrozen = null;
 
         if (cfg.nativeFirst && nativeDetector && cfg.deg === 0) {
           try {
-            const vHits = await nativeDetector.detect(video);
+            const vHits = await nativeDetector.detect(frozenCanvas);
             if (vHits && vHits.length > 0 && vHits[0].rawValue) {
               candidate = String(vHits[0].rawValue).trim();
-              posInVideo = convertCornerPointsToPos(vHits[0].cornerPoints, 1, 1);
+              posOnFrozen = convertCornerPointsToPos(vHits[0].cornerPoints, 1, 1);
             }
           } catch (e) {}
         }
 
         if (!candidate) {
           const vis = getVisibleAimRectInVideo(video, 0.10);
-          let sx = vis.sx;
-          let sy = vis.sy;
-          let sw = vis.sw;
-          let sh = vis.sh;
+          const scaleX = fw / Math.max(1, vw);
+          const scaleY = fh / Math.max(1, vh);
+          let sx = Math.round(vis.sx * scaleX);
+          let sy = Math.round(vis.sy * scaleY);
+          let sw = Math.max(120, Math.round(vis.sw * scaleX));
+          let sh = Math.max(90, Math.round(vis.sh * scaleY));
 
           if (cfg.mode === 'zoom') {
-            sw = Math.max(180, Math.round(vis.sw * 0.50));
-            sh = Math.max(120, Math.round(vis.sh * 0.50));
-            sx = vis.sx + Math.round((vis.sw - sw) / 2);
-            sy = vis.sy + Math.round((vis.sh - sh) / 2);
+            const zw = Math.max(160, Math.round(sw * 0.50));
+            const zh = Math.max(110, Math.round(sh * 0.50));
+            sx = sx + Math.round((sw - zw) / 2);
+            sy = sy + Math.round((sh - zh) / 2);
+            sw = zw;
+            sh = zh;
           } else if (cfg.mode === 'full') {
             sx = 0;
             sy = 0;
-            sw = vw;
-            sh = vh;
+            sw = fw;
+            sh = fh;
           }
 
+          sx = Math.max(0, Math.min(fw - 10, sx));
+          sy = Math.max(0, Math.min(fh - 10, sy));
+          sw = Math.max(10, Math.min(fw - sx, sw));
+          sh = Math.max(10, Math.min(fh - sy, sh));
+
           const hit = await tryDecodeRegionOnCanvas(
-            workCanvas, workCtx, video, sx, sy, sw, sh, cfg.deg, 1850, 24, cfg.sharp, false
+            workCanvas, workCtx, frozenCanvas, sx, sy, sw, sh, cfg.deg, 1850, 24, cfg.sharp, false
           );
           if (hit && hit.code) {
             candidate = hit.code;
             if (hit.posOnWork) {
-              posInVideo = mapPositionToTargetCanvas(
-                hit.posOnWork, hit.dw, hit.dh, cfg.deg, sx, sy, sw, sh, vw, vh, vw, vh, hit.pad
+              posOnFrozen = mapPositionToTargetCanvas(
+                hit.posOnWork, hit.dw, hit.dh, cfg.deg, sx, sy, sw, sh, fw, fh, fw, fh, hit.pad
               );
             }
           }
@@ -2885,15 +3361,7 @@
         if (candidate && singleScanToken === myToken && singleScanActive) {
           const check = parseSingle13DigitScaleBarcode(candidate);
           if (check.ok) {
-            const fullFrameCanvas = captureCleanFullVideoCanvas(video);
-            const mappedPos = posInVideo
-              ? convertCornerPointsToPos(
-                  [posInVideo.topLeft, posInVideo.topRight, posInVideo.bottomRight, posInVideo.bottomLeft],
-                  fullFrameCanvas.width / vw,
-                  fullFrameCanvas.height / vh
-                )
-              : null;
-
+            const fullFrameCanvas = cloneCanvas(frozenCanvas);
             singleScanActive = false;
             singleScanToken += 1;
             shutterLockUntil = Date.now() + 180;
@@ -2901,7 +3369,7 @@
             setShutterUIState('captured');
             handleBarcodeInput(candidate, 'Camera', null, {
               frameCanvas: fullFrameCanvas,
-              barcodePos: mappedPos,
+              barcodePos: posOnFrozen,
               liveVideo: video,
               allowTilt: true
             });
@@ -2940,6 +3408,8 @@
     singleScanToken += 1;
     radarLoopId += 1;
     livePreLock = null;
+    autoSnapStreakCode = '';
+    autoSnapStreakCount = 0;
     const viewportBox = document.getElementById('cameraViewportBox');
     if (viewportBox) viewportBox.classList.remove('is-prelocked', 'is-scanning', 'is-captured');
     if (mediaStream) {
@@ -2997,15 +3467,11 @@
       const cleanPack = await loadCleanCanvasFromFile(file, 2200);
       const cleanCanvas = cleanPack.canvas;
 
-      const wasmResultPromise = decodePhotoInBrowserWasm(file, cleanCanvas);
-      const tasks = [wasmResultPromise];
-      if (location.protocol.startsWith('http') && (location.port === '8088' || location.port === '8443')) {
-        tasks.push(decodePhotoViaLocalCppServer(file).then(function (c) {
-          return c ? { code: c, position: null } : null;
-        }));
+      let hit = await decodePhotoInBrowserWasm(file, cleanCanvas);
+      if (!hit && navigator.onLine && location.protocol.startsWith('http') && (location.port === '8088' || location.port === '8443')) {
+        const srvCode = await decodePhotoViaLocalCppServer(file);
+        if (srvCode) hit = { code: srvCode, position: null };
       }
-
-      const hit = await raceFirstNonNull(tasks);
 
       if (hit && hit.code) {
         // Chốt mã vạch & kêu BÍP ngay lập tức (< 0.08s), tự đọc NSX/HSD ngầm bên dưới không bắt chờ!
@@ -3017,7 +3483,7 @@
         });
       } else {
         // Nếu người dùng chụp cận cảnh chỉ có dòng chữ NSX/HSD -> tự động đọc ngày gắn vào tem vừa quét!
-        const onlyDates = await extractNsxHsdWithTimeout(cleanCanvas, null, 2800, true);
+        const onlyDates = await extractNsxHsdWithTimeout(cleanCanvas, null, 2800, true, cropCenterAimFromCanvas(cleanCanvas));
         if ((onlyDates.nsx || onlyDates.hsd) && records.length > 0) {
           const latest = records[records.length - 1];
           if (onlyDates.nsx) latest.nsx = onlyDates.nsx;
@@ -3047,14 +3513,16 @@
     const targetRec = records[records.length - 1];
     const video = document.getElementById('cameraVideo');
 
-    // Nếu Camera trực tiếp đang mở -> chụp thẳng từ luồng hình Camera để đọc bù NSX/HSD tức thì (0.3 giây), không bắt mở hộp chọn tệp!
+    // Nếu Camera trực tiếp đang mở -> chụp thẳng từ luồng hình Camera để đọc bù NSX/HSD tức thì (0.25 giây), không bắt mở hộp chọn tệp!
     if (cameraActive && mediaStream && video && video.readyState >= 2 && video.videoWidth > 0) {
       showBanner('warn', '⚡ Đang chụp đọc bù NSX & HSD trực tiếp từ Camera...');
       readingDateRecordIds[targetRec.id] = true;
       renderAll(false);
+      const snapRescue = captureCleanFullVideoCanvas(video);
       await fillRecordDatesInBackground(targetRec.id, {
-        frameCanvas: captureCleanFullVideoCanvas(video),
+        frameCanvas: snapRescue,
         barcodePos: null,
+        rescueAimCropCanvas: cropCenterAimFromCanvas(snapRescue),
         liveVideo: video,
         allowTilt: true,
         ignoreBarcodeMismatch: true
@@ -3079,7 +3547,13 @@
     try {
       const cleanPack = await loadCleanCanvasFromFile(file, 2200);
       const hitPos = await detectBarcodePositionOnCanvas(cleanPack.canvas);
-      const dates = await extractNsxHsdWithTimeout(cleanPack.canvas, hitPos, 5200, true);
+      const dates = await extractNsxHsdWithTimeout(
+        cleanPack.canvas,
+        hitPos,
+        4200,
+        true,
+        hitPos ? null : cropCenterAimFromCanvas(cleanPack.canvas)
+      );
       if (!dates.nsx && !dates.hsd) {
         playBeep('error');
         showBanner('error', 'Chưa đọc rõ chữ NSX / HSD trong ảnh. Hãy chụp rõ nét dòng NSX / HSD trên tem!');
@@ -3241,9 +3715,11 @@
 
   function decodeEan13FromBitLine(bits, len) {
     const runs = [];
+    const runStarts = [];
     let idx = 0;
     while (idx < len && bits[idx] === 0) idx++;
     while (idx < len) {
+      const startX = idx;
       const val = bits[idx];
       let count = 1;
       idx++;
@@ -3251,6 +3727,7 @@
         count++;
         idx++;
       }
+      runStarts.push(startX);
       runs.push(count);
     }
     if (runs.length < 59) return null;
@@ -3301,7 +3778,11 @@
 
       const full13 = firstDigit + leftDigits + rightDigits;
       if (calcEan13CheckDigit(full13.slice(0, 12)) === parseInt(full13.charAt(12), 10)) {
-        return full13;
+        return {
+          code: full13,
+          x0: runStarts[s],
+          x1: runStarts[s + 58] + runs[s + 58]
+        };
       }
     }
     return null;
@@ -3342,17 +3823,73 @@
         revBits[w - 1 - x] = isDark;
       }
       const c1 = decodeEan13FromBitLine(bits, w);
-      if (c1) {
-        votes[c1] = (votes[c1] || 0) + 1;
-        if (votes[c1] >= 2) return c1;
+      if (c1 && c1.code) {
+        let rec = votes[c1.code];
+        if (!rec) {
+          rec = { code: c1.code, rev: false, count: 0, sumXStart: 0, sumXEnd: 0, minY: y, maxY: y, firstX: c1.x0, lastX: c1.x0 };
+          votes[c1.code] = rec;
+        }
+        rec.count += 1;
+        rec.sumXStart += c1.x0;
+        rec.sumXEnd += c1.x1;
+        if (y < rec.minY) { rec.minY = y; rec.firstX = c1.x0; }
+        if (y >= rec.maxY) { rec.maxY = y; rec.lastX = c1.x0; }
       }
       const c2 = decodeEan13FromBitLine(revBits, w);
-      if (c2) {
-        votes[c2] = (votes[c2] || 0) + 1;
-        if (votes[c2] >= 2) return c2;
+      if (c2 && c2.code) {
+        const origStart = w - 1 - c2.x0;
+        const origEnd = w - 1 - c2.x1;
+        const revKey = 'rev_' + c2.code;
+        let rec = votes[revKey];
+        if (!rec) {
+          rec = { code: c2.code, rev: true, count: 0, sumXStart: 0, sumXEnd: 0, minY: y, maxY: y, firstX: origStart, lastX: origStart };
+          votes[revKey] = rec;
+        }
+        rec.count += 1;
+        rec.sumXStart += origStart;
+        rec.sumXEnd += origEnd;
+        if (y < rec.minY) { rec.minY = y; rec.firstX = origStart; }
+        if (y >= rec.maxY) { rec.maxY = y; rec.lastX = origStart; }
       }
     }
-    return null;
+
+    let bestRec = null;
+    const keys = Object.keys(votes);
+    for (let k = 0; k < keys.length; k++) {
+      const r = votes[keys[k]];
+      if (r.count >= 2 && (!bestRec || r.count > bestRec.count)) {
+        bestRec = r;
+      }
+    }
+    if (!bestRec) return null;
+
+    const xStart = bestRec.sumXStart / bestRec.count;
+    const xEnd = bestRec.sumXEnd / bestRec.count;
+    const barHalfH = Math.max(12, Math.max((bestRec.maxY - bestRec.minY) / 2, Math.abs(xEnd - xStart) * 0.12));
+    const cy = (bestRec.minY + bestRec.maxY) / 2;
+    const isFlat = Math.abs(bestRec.lastX - bestRec.firstX) <= 5;
+    if (bestRec.rev) {
+      return {
+        code: bestRec.code,
+        isFlat: isFlat,
+        pos: {
+          topLeft: { x: xStart, y: cy + barHalfH },
+          topRight: { x: xEnd, y: cy + barHalfH },
+          bottomRight: { x: xEnd, y: cy - barHalfH },
+          bottomLeft: { x: xStart, y: cy - barHalfH }
+        }
+      };
+    }
+    return {
+      code: bestRec.code,
+      isFlat: isFlat,
+      pos: {
+        topLeft: { x: xStart, y: cy - barHalfH },
+        topRight: { x: xEnd, y: cy - barHalfH },
+        bottomRight: { x: xEnd, y: cy + barHalfH },
+        bottomLeft: { x: xStart, y: cy + barHalfH }
+      }
+    };
   }
 
   async function decodePhotoInBrowserWasm(file, preloadedCleanCanvas) {
@@ -3386,6 +3923,8 @@
         { cw: 0.98, ch: 0.98, ox: 0, oy: 0, deg: 90, maxDim: 1900, pad: 26, sharp: true, nat: false }
       ];
 
+      const hasWasmEngine = Boolean(window.ZXingWASM && window.ZXingWASM.readBarcodesFromImageData);
+      let pureJsVerified = null;
       let fallbackUnverified = null;
 
       for (let i = 0; i < passes.length; i++) {
@@ -3403,15 +3942,24 @@
             ? mapPositionToTargetCanvas(hit.posOnWork, hit.dw, hit.dh, p.deg, sx, sy, sw, sh, bw, bh, outW, outH, hit.pad)
             : null;
           if (!hit.unverified) {
-            if (bmp.close) bmp.close();
-            return { code: hit.code, position: mappedPos };
+            if (!hit.fromPureJs || !hasWasmEngine) {
+              if (bmp.close) bmp.close();
+              return { code: hit.code, position: mappedPos };
+            } else if (!pureJsVerified) {
+              pureJsVerified = { code: hit.code, position: mappedPos, isFlat: Boolean(hit.isFlatJs) };
+            }
           } else if (!fallbackUnverified) {
             fallbackUnverified = { code: hit.code, position: mappedPos };
           }
         }
+        if (pureJsVerified && pureJsVerified.isFlat && i >= 1) {
+          if (bmp.close) bmp.close();
+          return { code: pureJsVerified.code, position: pureJsVerified.position };
+        }
       }
 
       if (bmp.close) bmp.close();
+      if (pureJsVerified) return pureJsVerified;
       if (fallbackUnverified) return fallbackUnverified;
     } catch (e) {}
 
@@ -3621,6 +4169,8 @@
       // BẮT BUỘC: Nếu trong lúc đang đẩy lên Google Sheet mà có thao tác cập nhật NSX/HSD hoặc tem mới phát sinh -> tự động đẩy tiếp ngay lập tức!
       if (!hadError && pendingOps.length > 0 && navigator.onLine && activeDateReadsCount === 0) {
         setTimeout(function () { flushSyncQueue(false); }, 80);
+      } else if (pendingOps.length === 0 && activeDateReadsCount === 0) {
+        setTimeout(checkPendingSwReload, 120);
       }
     }
   }
@@ -3739,6 +4289,7 @@
   }
 
   function sendLocalServerBackup() {
+    if (!navigator.onLine) return;
     if (location.protocol.startsWith('http') && (location.port === '8088' || location.port === '8443')) {
       const m = computeMetrics();
       fetch('/api/local-backup', {
