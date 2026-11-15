@@ -1,5 +1,5 @@
-const CACHE_NAME = 'scan-ton-kho-v10b';
-const ASSETS = [
+const CACHE_NAME = 'scan-ton-kho-v11';
+const CORE_ASSETS = [
   './',
   './index.html',
   './styles.css',
@@ -11,16 +11,13 @@ const ASSETS = [
   './vendor/zxing_wasm_reader.js',
   './vendor/zxing_reader.wasm',
   './vendor/ocr/tesseract.min.js',
-  './vendor/ocr/worker.min.js',
-  './vendor/ocr/tesseract-core-lstm.wasm.js',
-  './vendor/ocr/tesseract-core-simd-lstm.wasm.js',
-  './vendor/ocr/eng.traineddata.gz'
+  './vendor/ocr/worker.min.js'
 ];
 
 self.addEventListener('install', function (event) {
   event.waitUntil(
     caches.open(CACHE_NAME).then(function (cache) {
-      return cache.addAll(ASSETS);
+      return cache.addAll(CORE_ASSETS);
     })
   );
   self.skipWaiting();
@@ -83,18 +80,20 @@ self.addEventListener('fetch', function (event) {
     return;
   }
 
-  // Các thư viện giải mã mã vạch C++ WASM & bộ đọc chữ NSX/HSD: ưu tiên lấy tức thì từ bộ nhớ máy (0ms, hoạt động 100% khi mất mạng)
+  // Các thư viện giải mã mã vạch 1D & bộ đọc chữ NSX/HSD: ưu tiên lấy tức thì từ bộ nhớ máy (0ms, hoạt động 100% khi mất mạng)
   if (
     url.indexOf('/vendor/') !== -1 ||
     url.indexOf('.wasm') !== -1 ||
-    url.indexOf('.traineddata.gz') !== -1
+    url.indexOf('.traineddata') !== -1
   ) {
+    var cleanUrl = url.replace(/([^:]\/)\/+/g, '$1');
     event.respondWith(
-      caches.match(event.request, { ignoreSearch: true }).then(function (cached) {
-        return cached || fetch(event.request).then(function (netResp) {
+      caches.match(cleanUrl, { ignoreSearch: true }).then(function (cached) {
+        if (cached) return cached;
+        return fetch(cleanUrl).then(function (netResp) {
           if (netResp && netResp.ok) {
             var copy = netResp.clone();
-            caches.open(CACHE_NAME).then(function (c) { c.put(event.request, copy); });
+            caches.open(CACHE_NAME).then(function (c) { c.put(cleanUrl, copy); });
           }
           return netResp;
         });
