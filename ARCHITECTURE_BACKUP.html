@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hồ Sơ Kiến Trúc & Bản Sao Lưu Logic — App Quét Tồn Kho Tem Mã Vạch</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Roboto, Arial, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+      line-height: 1.6;
+    }
+    .hero {
+      background: linear-gradient(135deg, #0f2942 0%, #1e3a5f 100%);
+      color: #fff;
+      padding: 28px 24px;
+    }
+    .container {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 24px 20px 60px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 14px;
+      border: 1px solid #cbd5e1;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+    }
+    h1 { margin: 0 0 6px; font-size: 24px; }
+    h2 { color: #0f2942; margin-top: 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; }
+    .barcode-demo {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin: 16px 0;
+      text-align: center;
+    }
+    .bc-seg {
+      border-radius: 10px;
+      padding: 12px 8px;
+      font-weight: 700;
+    }
+    .seg-prefix { background: #e2e8f0; color: #334155; }
+    .seg-code { background: #e0f2fe; color: #0369a1; border: 2px solid #0284c7; }
+    .seg-weight { background: #dcfce7; color: #15803d; border: 2px solid #16a34a; }
+    .seg-check { background: #fef3c7; color: #b45309; }
+    .bc-digits { font-size: 24px; font-weight: 900; font-family: Consolas, monospace; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th, td { border: 1px solid #cbd5e1; padding: 9px 12px; text-align: left; font-size: 14px; }
+    th { background: #0f2942; color: #fff; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 5px; font-family: Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <div class="container" style="padding-top:0;padding-bottom:0;">
+      <h1>📦 HỒ SƠ KIẾN TRÚC & BẢN SAO LƯU HỆ THỐNG — APP QUÉT TỒN KHO TEM MÃ VẠCH</h1>
+      <div>Dùng cho Điện thoại & Máy kiểm kho cầm tay (PDA) • Đồng bộ thời gian thực với Google Sheet</div>
+    </div>
+  </div>
+
+  <div class="container">
+
+    <div class="card">
+      <h2>1. Quy Tắc Bóc Tách Dải Mã Vạch Sọc 13 Số (Chuẩn KCS)</h2>
+      <p>
+        Hệ thống <strong>chỉ quét dải mã vạch sọc ngang 13 chữ số</strong> trên tem cân (khóa cứng hoàn toàn không quét ô vuông QR ở góc tem để tránh nhầm dữ liệu).
+        Ví dụ thực tế từ tem <strong>MEATCOOL CHÂN GIÒ HEO TRƯỚC (Kg)</strong> có mã vạch <code>1010040051985</code>:
+      </p>
+      <div class="barcode-demo">
+        <div class="bc-seg seg-prefix">
+          <div>Vị trí 1 – 2 (Bỏ qua)</div>
+          <div class="bc-digits">10</div>
+          <div style="font-size:12.5px;">Đầu mã tem cân ký (10, 11, 20–29)</div>
+        </div>
+        <div class="bc-seg seg-code">
+          <div>Vị trí 3 – 7 (5 số)</div>
+          <div class="bc-digits">10040</div>
+          <div style="font-size:12.5px;"><strong>Mã sản phẩm</strong> → Tra ra Tên SP</div>
+        </div>
+        <div class="bc-seg seg-weight">
+          <div>Vị trí 8 – 12 (5 số)</div>
+          <div class="bc-digits">05198</div>
+          <div style="font-size:12.5px;"><strong>Chia 1.000 = 5.198 Kg</strong> (Khối lượng tịnh)</div>
+        </div>
+        <div class="bc-seg seg-check">
+          <div>Vị trí 13 (1 số cuối)</div>
+          <div class="bc-digits">5</div>
+          <div style="font-size:12.5px;">Số kiểm tra chống gõ sai mã vạch</div>
+        </div>
+      </div>
+      <ul>
+        <li><strong>Cộng dồn chính xác tuyệt đối theo đơn vị gram nguyên</strong>: Toàn bộ phép cộng, sửa, xóa đều tính bằng số nguyên gram (<code>5198</code> gram) rồi mới chia <code>1.000</code> khi hiển thị, triệt tiêu 100% sai số làm tròn số thập phân.</li>
+        <li><strong>Nguyên tắc Không Tự Đoán (Fail-Closed)</strong>: Nếu quét trúng mã 5 số mới chưa có trong danh mục 120 mã sẵn có, hệ thống giữ trống tên là <code>—</code> và nhắc người dùng đặt tên, tuyệt đối không tự gán tên giả hay số ảo.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>2. Sơ Đồ Luồng Hoạt Động Toàn Hệ Thống</h2>
+      <div class="mermaid">
+flowchart TD
+    A["Mở đường link Online cố định 1 lần đầu tiên\n(Dùng 4G / 5G / Bất kỳ Wi-Fi nào, không cần cùng mạng máy tính)"] --> B["Tự tải sẵn bộ quét & 120 mã hàng vào bộ nhớ máy\n(Hoạt động 100% cả khi vào kho lạnh mất sạch mạng)"]
+    B --> C["Nhân viên quét dải mã vạch sọc 13 số\n(Mọi máy PDA laser hoặc Bấm nút tròn chụp 1 tem trên Camera ĐT)"]
+    C --> D{"Kiểm tra KCS mã vạch\n(Đủ 13 số + Đúng số kiểm tra + Đầu tem cân)"}
+    D -- "Sai chuẩn / Nhầm tem đóng gói" --> E["Báo âm thanh cảnh báo đỏ\nKhông ghi nhận dữ liệu rác"]
+    D -- "Hợp lệ (VD: 1010040051985)" --> F["Tách Mã SP (10040) + Số ký (5.198 Kg)\nTra Tên SP trong Danh mục 120 mã"]
+    F --> G["Lưu kép an toàn 2 lớp ngay trên thiết bị\n(Không bao giờ mất dữ liệu kể cả khi rớt mạng hay tắt máy)"]
+    G --> H{"Kiểm tra sóng mạng\n(4G / 5G / Wi-Fi)"}
+    H -- "Đang mất mạng (Offline)" --> I["Xếp hàng chờ trên máy\nBáo trạng thái Đang Offline"]
+    I -- "Ngay khi có mạng trở lại" --> K["Tự động đẩy toàn bộ dữ liệu tồn đọng lên Google Sheet\n(Không cần bấm tay, chống trùng lặp 100%)"]
+    H -- "Đang có mạng" --> K
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>3. Cấu Trúc Lưu Trữ & Đồng Bộ Trên Google Sheet</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Tên Trang Tính</th>
+            <th>Các Cột Thể Hiện</th>
+            <th>Cơ Chế Tự Động</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>1. Chi_Tiet_Scan</strong></td>
+            <td>
+              1. Ngày giờ scan<br>
+              2. Tên sản phẩm<br>
+              3. Mã sản phẩm<br>
+              4. Số ký tem vừa scan<br>
+              5. Tổng số tem đã scan<br>
+              6. Tổng số sản phẩm đã scan<br>
+              7. Tổng số ký đã scan
+            </td>
+            <td>Mỗi lần quét thêm 1 dòng; khi nhân viên bấm <strong>Sửa</strong> hoặc <strong>Xóa</strong> trên App, dòng tương ứng trên Google Sheet tự động sửa/xóa theo và tính lại toàn bộ các cột Tổng lũy kế từ trên xuống dưới.</td>
+          </tr>
+          <tr>
+            <td><strong>2. Tong_Hop_Ton</strong></td>
+            <td>3 Ô Tổng quan lớn + Bảng gom nhóm theo từng Mã sản phẩm (Số tem, Tổng số ký, Bình quân Kg/tem, Tỷ trọng %)</td>
+            <td>Tự động gom nhóm và đối soát khớp 100% tới từng gram với trang <code>Chi_Tiet_Scan</code>.</td>
+          </tr>
+          <tr>
+            <td><strong>3. Danh_Muc_SP</strong></td>
+            <td>Mã sản phẩm (5 số), Tên sản phẩm hiển thị, Tên đầy đủ, Mã Inventory ID</td>
+            <td>Nạp sẵn 120 mã hàng MEATCOOL thực tế; cho phép thêm/sửa tên mặt hàng mới.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <h2>4. Danh Mục Tệp Tin Đầy Đủ Để Phục Hồi Hệ Thống</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Tên File</th>
+            <th>Vai Trò</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><code>index.html</code>, <code>styles.css</code>, <code>app.js</code></td><td>Giao diện và bộ xử lý trung tâm trên mọi Điện thoại (iOS/Android) & mọi dòng máy PDA (Zebra, Urovo, Sunmi, Honeywell, iData, Newland).</td></tr>
+          <tr><td><code>sw.js</code>, <code>manifest.json</code>, <code>icon-192.svg</code></td><td>Bộ lưu trữ ngoại tuyến (Offline) giúp mở app, quét tem và giữ nguyên dữ liệu khi kho lạnh mất sóng mạng, tự đẩy lên Google Sheet khi có mạng lại.</td></tr>
+          <tr><td><code>catalog.js</code></td><td>Danh mục chuẩn 120 mã hàng 5 số trích xuất từ dữ liệu vận hành thực tế.</td></tr>
+          <tr><td><code>vendor/zxing_wasm_reader.js</code>, <code>vendor/zxing_reader.wasm</code></td><td>Bộ giải mã hình ảnh mã vạch sọc 1D siêu tốc (kèm tầng dự phòng thuần JavaScript cho máy đời cũ), đã khóa cứng mã QR.</td></tr>
+          <tr><td><code>Google_Apps_Script_Ket_Noi_Sheet.gs</code></td><td>Đoạn mã gắn vào Google Sheet nhận đồng bộ tự động qua mọi mạng 4G/5G/Wi-Fi, chống ghi trùng dữ liệu.</td></tr>
+          <tr><td><code>Cap_Nhat_Len_Web_Online.bat</code></td><td>Tệp bấm đúp cập nhật phiên bản mới lên đường link Online cố định (<code>https://longdoanthanh-bot.github.io/scan-ton-kho/</code>).</td></tr>
+          <tr><td><code>kcs_verify.py</code></td><td>Kịch bản cầu dao tự ngắt kiểm tra chất lượng mã nguồn, tiếng Việt UTF-8, kiểm thử quét Offline và tự động đồng bộ khi có mạng.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'default' });</script>
+</body>
+</html>

@@ -1,0 +1,113 @@
+const CACHE_NAME = 'scan-ton-kho-v5';
+const ASSETS = [
+  './',
+  './index.html',
+  './styles.css',
+  './app.js',
+  './catalog.js',
+  './apps_script_embed.js',
+  './manifest.json',
+  './icon-192.svg',
+  './vendor/zxing_wasm_reader.js',
+  './vendor/zxing_reader.wasm'
+];
+
+self.addEventListener('install', function (event) {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then(function (cache) {
+      return cache.addAll(ASSETS);
+    })
+  );
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', function (event) {
+  event.waitUntil(
+    caches.keys().then(function (keys) {
+      return Promise.all(
+        keys.filter(function (k) { return k !== CACHE_NAME; })
+            .map(function (k) { return caches.delete(k); })
+      );
+    })
+  );
+  self.clients.claim();
+});
+
+function fetchWithTimeout(request, timeoutMs) {
+  return new Promise(function (resolve, reject) {
+    var done = false;
+    var timer = setTimeout(function () {
+      if (!done) {
+        done = true;
+        reject(new Error('network_timeout'));
+      }
+    }, timeoutMs);
+
+    fetch(request).then(function (resp) {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        resolve(resp);
+      }
+    }).catch(function (err) {
+      if (!done) {
+        done = true;
+        clearTimeout(timer);
+        reject(err);
+      }
+    });
+  });
+}
+
+self.addEventListener('fetch', function (event) {
+  if (event.request.method !== 'GET') return;
+
+  var url = event.request.url || '';
+  // Không lưu đệm các lệnh gọi đồng bộ trực tiếp lên Google Sheet hoặc API nội bộ
+  if (
+    url.indexOf('script.google.com') !== -1 ||
+    url.indexOf('googleusercontent.com') !== -1 ||
+    url.indexOf('/api/') !== -1
+  ) {
+    return;
+  }
+
+  // Bộ giải mã C++ WASM: ưu tiên lấy tức thì từ bộ nhớ máy (0ms, hoạt động 100% khi mất mạng)
+  if (url.indexOf('.wasm') !== -1) {
+    event.respondWith(
+      caches.match(event.request, { ignoreSearch: true }).then(function (cached) {
+        return cached || fetch(event.request).then(function (netResp) {
+          if (netResp && netResp.ok) {
+            var copy = netResp.clone();
+            caches.open(CACHE_NAME).then(function (c) { c.put('./vendor/zxing_reader.wasm', copy); });
+          }
+          return netResp;
+        });
+      })
+    );
+    return;
+  }
+
+  // Các tệp giao diện & danh mục 120 mã hàng:
+  // Có mạng nhanh (< 2.5 giây) -> lấy bản mới nhất và cập nhật bộ nhớ máy;
+  // Mất mạng hoặc sóng kho lạnh yếu -> mở ngay lập tức từ bộ nhớ Offline (ignoreSearch=true)!
+  event.respondWith(
+    fetchWithTimeout(event.request, 2500).then(function (netResp) {
+      if (netResp && netResp.ok && url.indexOf(self.location.origin) === 0) {
+        var clone = netResp.clone();
+        caches.open(CACHE_NAME).then(function (cache) {
+          cache.put(event.request, clone);
+        });
+      }
+      return netResp;
+    }).catch(function () {
+      return caches.match(event.request, { ignoreSearch: true }).then(function (cached) {
+        if (cached) return cached;
+        if (event.request.mode === 'navigate') {
+          return caches.match('./index.html', { ignoreSearch: true });
+        }
+        return new Response('Offline', { status: 503 });
+      });
+    })
+  );
+});

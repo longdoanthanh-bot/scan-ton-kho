@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f2942">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Quét Tồn Kho Tem Mã Vạch (Mọi Điện Thoại & Máy PDA • Offline & Cloud)</title>
+  <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
+  <link rel="apple-touch-icon" href="./icon-192.svg">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="stylesheet" href="./styles.css?v=5">
+</head>
+<body>
+
+  <!-- Thanh tiêu đề cố định trên cùng -->
+  <header class="app-header">
+    <div class="header-top">
+      <div>
+        <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
+        <div class="brand-sub">Mọi ĐT & Máy PDA • Quét được khi mất mạng • Tự cập nhật khi có mạng</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <button type="button" id="btnInstallPwa" class="sync-pill" style="display:none;background:rgba(34,197,94,0.22);border-color:#4ade80;" title="Cài ra màn hình chính để mở nhanh khi mất mạng">
+          <span>📲 Cài Offline</span>
+        </button>
+        <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
+          <span id="syncStatusDot" class="sync-dot"></span>
+          <span id="syncStatusText">⚙️ Kết nối GG Sheet</span>
+        </button>
+      </div>
+    </div>
+    <div id="offlineStatusBar" style="display:none;margin-top:6px;background:#7c2d12;border:1px solid #fb923c;color:#ffedd5;padding:6px 10px;border-radius:8px;font-size:12px;font-weight:700;line-height:1.35;">
+      📴 <span id="offlineStatusBarText">Đang không có mạng (Offline) — Bạn cứ quét bình thường! Dữ liệu được lưu an toàn 100% trên máy và sẽ TỰ ĐỘNG cập nhật lên Google Sheet ngay khi có mạng.</span>
+    </div>
+  </header>
+
+  <main class="app-container">
+
+    <!-- ==================== KHUNG QUÉT ĐẶT TRÊN ĐẦU (CHỈ HIỆN Ở TAB QUÉT TỒN) ==================== -->
+    <div id="scanTopSection">
+
+      <!-- Thanh chọn chế độ quét -->
+      <div class="mode-bar">
+        <button type="button" class="mode-btn active" data-mode="pda">🔫 Máy PDA</button>
+        <button type="button" class="mode-btn" data-mode="camera">📷 Camera ĐT</button>
+        <button type="button" class="mode-btn" data-mode="manual">⌨️ Nhập mã</button>
+      </div>
+
+      <!-- Khung nhận tia quét PDA / Nhập mã 13 số -->
+      <div id="scanBoxCard" class="scan-box-card">
+        <div class="scan-input-row">
+          <input
+            type="text"
+            id="barcodeInput"
+            class="scan-input"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            inputmode="none"
+            placeholder="Bấm nút tia laser PDA để quét tem..."
+          >
+          <button type="button" id="btnSubmitBarcode" class="btn btn-primary">Quét</button>
+        </div>
+        <div class="scan-helper-bar">
+          <span id="scanModeHint">🔫 Chế độ PDA: Đã ẩn bàn phím ảo & tự nhận tia quét toàn màn hình</span>
+          <div style="display:flex;gap:6px;">
+            <button type="button" id="btnQuickPhotoScan" class="icon-btn">🖼️ Quét ảnh tem</button>
+            <button type="button" id="btnOpenManualAdd" class="icon-btn">➕ Nhập điều chỉnh</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Khung Camera Điện Thoại 3X — BẤM NÚT CHỤP MỚI BẮT ĐẦU QUÉT ĐÚNG 1 TEM (CHỐNG QUÉT DƯ 100%) -->
+      <div id="cameraBoxCard" class="camera-card" style="display:none;">
+
+        <!-- Hộp chuyển nhanh sang HTTPS nếu người dùng lỡ mở bằng cổng HTTP thường trên điện thoại -->
+        <div id="httpsUpgradePrompt" style="display:none;background:#064e3b;border:2px solid #34d399;border-radius:11px;padding:12px;margin-bottom:10px;text-align:center;">
+          <div style="font-weight:900;font-size:14.5px;color:#ecfdf5;margin-bottom:6px;">
+            ⚡ Mở Camera Trực Tiếp Độ Nét Cao!
+          </div>
+          <div style="font-size:12.5px;color:#a7f3d0;margin-bottom:10px;line-height:1.45;">
+            Điện thoại bắt buộc dùng kết nối bảo mật <strong>HTTPS</strong> mới cho bật Camera trực tiếp.<br>
+            Bấm nút xanh bên dưới (nếu máy hỏi bảo mật nội bộ → chọn <strong>Chi tiết / Nâng cao → Tiếp tục truy cập</strong> 1 lần đầu tiên):
+          </div>
+          <a id="btnJumpHttps" href="#" class="btn btn-success" style="width:100%;font-size:14.5px;padding:12px;text-decoration:none;box-shadow:0 4px 12px rgba(0,0,0,0.3);">
+            🔒 BẬT CAMERA TRỰC TIẾP NGAY
+          </a>
+        </div>
+
+        <div class="camera-viewport" id="cameraViewportBox">
+          <video id="cameraVideo" playsinline webkit-playsinline="true" autoplay muted></video>
+
+          <!-- Thanh báo kết quả nổi gọn trên đỉnh khung Camera -->
+          <div id="cameraLiveHud" class="camera-live-hud">
+            <div style="min-width:0;flex:1;">
+              <div id="hudTopMeta" style="font-size:11.5px;color:#86efac;font-weight:800;">✅ TEM VỪA QUÉT</div>
+              <div id="hudProductName" style="font-size:15px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</div>
+            </div>
+            <div style="text-align:right;flex-shrink:0;">
+              <div id="hudWeight" style="font-size:17px;font-weight:900;color:#4ade80;">0.000 Kg</div>
+              <button type="button" id="btnHudEdit" style="border:none;background:#d97706;color:#fff;border-radius:6px;padding:3px 8px;font-size:11.5px;font-weight:700;cursor:pointer;margin-top:2px;">✏️ Sửa</button>
+            </div>
+          </div>
+
+          <!-- Khung ngắm mã vạch phóng đại 3X -->
+          <div class="barcode-aim-overlay">
+            <div class="barcode-aim-box">
+              <div class="laser-line"></div>
+            </div>
+          </div>
+
+          <!-- Cụm Nút Bấm Chụp Quét 1 Tem (Giống nút chụp hình điện thoại — Bấm mới quét, đọc xong 1 tem tự dừng ngay) -->
+          <div class="camera-shutter-dock">
+            <div id="cameraStatusBadge" class="camera-badge">
+              👆 Đưa mã vạch vào khung → Bấm nút tròn để chụp quét 1 tem
+            </div>
+            <button type="button" id="btnShutterScan" class="shutter-btn" aria-label="Bấm để chụp quét 1 tem">
+              <span class="shutter-inner" id="shutterInnerLabel">
+                <span class="shutter-icon" id="shutterIcon">📸</span>
+                <span class="shutter-text" id="shutterText">QUÉT</span>
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div class="camera-controls">
+          <div id="zoomButtonsGroup" style="display:flex;gap:5px;">
+            <button type="button" class="btn btn-outline zoom-btn" data-zoom="1" style="padding:8px 10px;font-size:12.5px;">1x</button>
+            <button type="button" class="btn btn-primary zoom-btn" data-zoom="1.5" style="padding:8px 10px;font-size:12.5px;">1.5x Rõ nét</button>
+            <button type="button" class="btn btn-outline zoom-btn" data-zoom="2" style="padding:8px 10px;font-size:12.5px;">2x</button>
+          </div>
+          <button type="button" id="btnToggleTorch" class="btn btn-outline" style="padding:8px 10px;font-size:12.5px;">🔦 Đèn</button>
+          <button type="button" id="btnPickImage" class="btn btn-primary" style="flex:1;padding:8px 10px;font-size:12.5px;">🖼️ Chọn ảnh có sẵn</button>
+        </div>
+      </div>
+
+      <input type="file" id="hiddenImageInput" accept="image/*" capture="environment" style="display:none;">
+    </div>
+
+    <!-- ==================== THÔNG BÁO & 3 THẺ TỔNG HỢP ĐẶT DƯỚI PHẦN SCAN ==================== -->
+    <div id="alertBanner" class="alert-banner" role="alert">
+      <span id="alertBannerText"></span>
+      <button type="button" class="icon-btn" onclick="document.getElementById('alertBanner').className='alert-banner'">Đóng</button>
+    </div>
+
+    <section class="kpi-grid" id="kpiSummarySection" aria-label="Tổng hợp đã quét">
+      <div class="kpi-card kpi-scans">
+        <div class="kpi-label">Tổng số tem đã scan</div>
+        <div id="kpiTotalScans" class="kpi-value">0</div>
+        <div class="kpi-unit">tem</div>
+      </div>
+      <div class="kpi-card kpi-products">
+        <div class="kpi-label">Tổng số sản phẩm đã scan</div>
+        <div id="kpiTotalProducts" class="kpi-value">0</div>
+        <div class="kpi-unit">sản phẩm</div>
+      </div>
+      <div class="kpi-card kpi-weight">
+        <div class="kpi-label">Tổng số ký đã scan</div>
+        <div id="kpiTotalKg" class="kpi-value">0.000</div>
+        <div class="kpi-unit">Kg</div>
+      </div>
+    </section>
+
+    <!-- ==================== TAB 1: CHI TIẾT TEM VỪA QUÉT ==================== -->
+    <div id="tabScan" class="tab-view active">
+
+      <!-- THẺ TEM VỪA SCAN -->
+      <section id="latestScanCard" class="latest-card">
+        <div id="latestEmptyState" style="text-align:center;padding:14px 6px;color:#475569;">
+          <div style="font-size:26px;margin-bottom:4px;">🏷️</div>
+          <div style="font-weight:800;color:#0f2942;">Sẵn sàng quét tem tồn kho siêu tốc</div>
+          <div style="font-size:12.5px;margin-top:2px;">
+            Quét dải mã vạch sọc 13 số trên tem (VD: <code>1010040051985</code> → Mã <code>10040</code>, Số ký <code>5.198 Kg</code>)
+          </div>
+        </div>
+
+        <div id="latestContentState" style="display:none;">
+          <div class="latest-header">
+            <span class="latest-badge">✅ TEM VỪA SCAN</span>
+            <span class="latest-time">🕒 Ngày giờ scan: <strong id="latestTime">—</strong></span>
+          </div>
+
+          <div style="font-size:11.5px;font-weight:700;color:#475569;">Tên sản phẩm:</div>
+          <div id="latestName" class="latest-product-name">—</div>
+
+          <div class="latest-details-grid">
+            <div class="detail-box">
+              <div class="detail-label">Mã sản phẩm</div>
+              <div id="latestCode" class="detail-val">—</div>
+            </div>
+            <div class="detail-box">
+              <div class="detail-label">Số ký tem vừa scan</div>
+              <div id="latestWeight" class="detail-val weight-highlight">0.000 Kg</div>
+            </div>
+          </div>
+
+          <div class="latest-meta-row">
+            <span id="latestBarcode">Mã vạch: —</span>
+            <div class="latest-actions">
+              <button type="button" id="btnEditLatest" class="btn btn-warning" style="padding:7px 11px;font-size:12.5px;">✏️ Sửa ngay</button>
+              <button type="button" id="btnDeleteLatest" class="btn btn-danger" style="padding:7px 11px;font-size:12.5px;">🗑️ Xóa</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5 Dòng Vừa Quét Gần Nhất -->
+      <section class="section-card">
+        <div class="section-header">
+          <h2 class="section-title">🕒 5 tem vừa quét gần nhất (Bấm Sửa nếu sai)</h2>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12.5px;font-weight:600;">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="checkbox" id="chkSoundToggle" checked> Âm báo
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+              <input type="checkbox" id="chkDupGuardToggle" checked> Hỏi khi trùng sát nhau
+            </label>
+            <button type="button" id="btnQuickClearSession" class="icon-btn del" title="Xóa trắng để quét lại từ 0">🧹 Xóa làm lại từ 0</button>
+          </div>
+        </div>
+        <div id="recentScansPreview" class="scan-list"></div>
+      </section>
+
+    </div>
+
+    <!-- ==================== TAB 2: DANH SÁCH ĐÃ QUÉT & CHỈNH SỬA ==================== -->
+    <div id="tabHistory" class="tab-view">
+      <section class="section-card">
+        <div class="section-header">
+          <h2 class="section-title">📋 Toàn bộ tem đã scan & Điều chỉnh</h2>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" id="btnOpenManualAdd2" class="btn btn-primary" style="padding:7px 10px;font-size:12.5px;">➕ Thêm / Điều chỉnh</button>
+            <button type="button" id="btnExportExcel" class="btn btn-success" style="padding:7px 10px;font-size:12.5px;">📥 Xuất Excel</button>
+            <button type="button" id="btnClearSession" class="btn btn-danger" style="padding:7px 10px;font-size:12.5px;">🧹 Xóa làm phiên mới</button>
+          </div>
+        </div>
+        <input type="search" id="searchHistoryInput" class="search-input" placeholder="🔍 Tìm theo Mã sản phẩm (10040), Tên sản phẩm, hoặc Mã vạch...">
+        <div id="fullScansList" class="scan-list"></div>
+      </section>
+    </div>
+
+    <!-- ==================== TAB 3: TỔNG HỢP THEO SẢN PHẨM ==================== -->
+    <div id="tabSummary" class="tab-view">
+      <section class="section-card">
+        <div class="section-header">
+          <h2 class="section-title">📊 Tổng hợp tồn theo từng sản phẩm</h2>
+          <div style="display:flex;gap:6px;">
+            <button type="button" id="btnForceSyncNow" class="btn btn-primary" style="padding:7px 11px;font-size:12.5px;">🔄 Đẩy lên GG Sheet</button>
+            <button type="button" id="btnExportExcel2" class="btn btn-success" style="padding:7px 11px;font-size:12.5px;">📥 Xuất Excel</button>
+          </div>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Mã SP</th>
+                <th>Tên sản phẩm</th>
+                <th class="num">Số tem</th>
+                <th class="num">Số ký (Kg)</th>
+              </tr>
+            </thead>
+            <tbody id="summaryTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <!-- ==================== TAB 4: DANH MỤC SẢN PHẨM ==================== -->
+    <div id="tabCatalog" class="tab-view">
+      <section class="section-card">
+        <div class="section-header">
+          <h2 class="section-title">🗂️ Danh mục Mã hàng (<span id="catalogCountLabel">120 mã</span>)</h2>
+          <button type="button" id="btnAddCatalogItem" class="btn btn-primary" style="padding:7px 11px;font-size:12.5px;">➕ Thêm mã mới</button>
+        </div>
+        <input type="search" id="searchCatalogInput" class="search-input" placeholder="🔍 Tra cứu mã 5 số (VD: 10040) hoặc tên thịt...">
+        <div style="overflow-x:auto;">
+          <table class="summary-table">
+            <thead>
+              <tr>
+                <th>Mã 5 số</th>
+                <th>Tên sản phẩm hiển thị</th>
+                <th style="text-align:right;">Thao tác</th>
+              </tr>
+            </thead>
+            <tbody id="catalogTableBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+  </main>
+
+  <!-- Thanh điều hướng dưới đáy màn hình -->
+  <nav class="bottom-nav">
+    <button type="button" class="nav-item active" data-tab="tabScan">
+      <span class="nav-icon">📷</span>
+      <span>Quét Tồn</span>
+    </button>
+    <button type="button" class="nav-item" data-tab="tabHistory">
+      <span class="nav-icon">✏️</span>
+      <span>Sửa / Đã quét<span id="navBadgeList"></span></span>
+    </button>
+    <button type="button" class="nav-item" data-tab="tabSummary">
+      <span class="nav-icon">📊</span>
+      <span>Theo Mã SP</span>
+    </button>
+    <button type="button" class="nav-item" data-tab="tabCatalog">
+      <span class="nav-icon">🗂️</span>
+      <span>Danh Mục</span>
+    </button>
+  </nav>
+
+  <!-- ==================== MODAL CHỈNH SỬA / ĐIỀU CHỈNH DÒNG QUÉT ==================== -->
+  <div id="editModal" class="modal-backdrop">
+    <div class="modal-box">
+      <h3 id="editModalTitle" class="modal-title">✏️ Chỉnh Sửa Dòng Đã Quét</h3>
+      <input type="hidden" id="editRecordId">
+
+      <div class="form-group">
+        <label class="form-label" for="editCodeInput">Mã sản phẩm (5 số — ví dụ: 10040)</label>
+        <input type="text" id="editCodeInput" class="form-control" inputmode="numeric" placeholder="10040">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="editNameInput">Tên sản phẩm</label>
+        <input type="text" id="editNameInput" class="form-control" placeholder="Chân giò heo trước">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="editWeightInput">Số ký (Kg — ví dụ: 5.198)</label>
+        <input type="text" id="editWeightInput" class="form-control" inputmode="decimal" placeholder="5.198">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="editNoteInput">Lý do sửa / Ghi chú điều chỉnh</label>
+        <input type="text" id="editNoteInput" class="form-control" placeholder="VD: Điều chỉnh số ký thực tế">
+      </div>
+
+      <label style="display:flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:#334155;cursor:pointer;">
+        <input type="checkbox" id="chkSaveToCatalog" checked>
+        Lưu luôn tên sản phẩm này vào Danh mục cho các lần quét sau
+      </label>
+
+      <div class="modal-actions">
+        <button type="button" id="btnModalDelete" class="btn btn-danger" style="margin-right:auto;">🗑️ Xóa dòng</button>
+        <button type="button" class="btn btn-outline" onclick="window.AppActions.closeModal('editModal')">Đóng</button>
+        <button type="button" id="btnSaveEdit" class="btn btn-success">💾 Lưu điều chỉnh</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL HỎI KHI QUÉT TRÙNG LIÊN TIẾP ==================== -->
+  <div id="duplicateModal" class="modal-backdrop">
+    <div class="modal-box">
+      <h3 class="modal-title" style="color:#b45309;">⚠️ Phát hiện quét lặp lại cùng 1 mã vạch!</h3>
+      <p style="margin:6px 0;font-size:14px;">
+        Mã vạch <strong id="dupModalBarcode"></strong> (<span id="dupModalInfo"></span>) vừa mới được quét cách đây vài giây.
+      </p>
+      <p style="margin:6px 0 12px;font-size:13.5px;color:#475569;">
+        Đây là <strong>túi hàng thứ 2 có cùng số ký</strong> hay bạn vô tình bấm quét nhầm 2 lần vào 1 túi?
+      </p>
+      <div class="modal-actions">
+        <button type="button" id="btnCancelDuplicate" class="btn btn-outline" style="flex:1;">❌ Bấm nhầm (Bỏ qua)</button>
+        <button type="button" id="btnConfirmDuplicate" class="btn btn-success" style="flex:1;">✅ Túi thứ 2 (Ghi nhận)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL CÀI ĐẶT KẾT NỐI GOOGLE SHEET 1 BƯỚC ==================== -->
+  <div id="sheetModal" class="modal-backdrop">
+    <div class="modal-box">
+      <h3 class="modal-title">📊 Kết Nối Tự Động Với Google Sheet</h3>
+
+      <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:10px 12px;margin-bottom:12px;">
+        <div style="font-weight:800;color:#0369a1;margin-bottom:4px;">Hướng dẫn gắn vào Google Sheet mới (chỉ làm 1 lần):</div>
+        <ol class="step-list">
+          <li>Mở một file Google Sheet trắng mới (gõ <strong>sheets.new</strong> trên máy tính).</li>
+          <li>Bấm nút bên dưới để sao chép sẵn đoạn mã tự động tạo bảng.</li>
+          <li>Trên Google Sheet, vào menu <strong>Tiện ích mở rộng (Extensions) → Apps Script</strong>, xóa chữ mặc định và <strong>Dán (Ctrl+V)</strong> mã vừa chép vào → bấm Lưu.</li>
+          <li>Bấm nút xanh <strong>Triển khai (Deploy) → Tùy chọn triển khai mới → Ứng dụng web (Web app)</strong>.</li>
+          <li>Mục <em>Ai có quyền truy cập</em> chọn <strong>Bất kỳ ai (Anyone)</strong> → Bấm <strong>Triển khai</strong> → Sao chép đường link (có đuôi <code>/exec</code>) dán vào ô bên dưới!</li>
+        </ol>
+        <button type="button" id="btnCopyAppsScript" class="btn btn-navy" style="width:100%;">
+          📋 Bước 1: Sao chép Mã Kết Nối Google Sheet
+        </button>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="sheetWebAppUrlInput">Đường link kết nối Web App (có đuôi <code>/exec</code>):</label>
+        <input type="url" id="sheetWebAppUrlInput" class="form-control" placeholder="https://script.google.com/macros/s/.../exec">
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="sheetViewUrlInput">Link mở xem file Google Sheet (tùy chọn — tự điền sau khi kết nối):</label>
+        <input type="url" id="sheetViewUrlInput" class="form-control" placeholder="https://docs.google.com/spreadsheets/d/...">
+      </div>
+
+      <!-- Hộp chia sẻ nhanh 1 chạm cho mọi Điện thoại & PDA trong kho -->
+      <div id="teamShareBox" style="display:none;background:#f0fdf4;border:1.5px solid #86efac;border-radius:10px;padding:10px 12px;margin-bottom:10px;">
+        <div style="font-weight:800;color:#15803d;font-size:13px;margin-bottom:4px;">
+          📲 Gửi cho Điện thoại / Máy PDA khác (Dùng 4G hoặc bất kỳ Wi-Fi nào):
+        </div>
+        <div style="font-size:12px;color:#166534;margin-bottom:7px;line-height:1.4;">
+          Bấm sao chép link này gửi qua Zalo — máy nào bấm vào cũng tự kết nối chung vào Google Sheet này và tự tải sẵn chế độ Offline!
+        </div>
+        <button type="button" id="btnCopyTeamLink" class="btn btn-success" style="width:100%;font-size:12.5px;padding:9px;">
+          🔗 Sao chép Link dùng chung cho mọi ĐT & PDA
+        </button>
+      </div>
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <button type="button" id="btnPullSheet" class="btn btn-outline" style="flex:1;">⬇️ Tải dữ liệu từ Sheet về máy</button>
+        <a id="btnOpenGoogleSheetTab" href="#" target="_blank" rel="noopener" class="btn btn-outline" style="flex:1;text-decoration:none;display:none;">🔗 Mở xem Google Sheet</a>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" class="btn btn-outline" onclick="window.AppActions.closeModal('sheetModal')">Đóng</button>
+        <button type="button" id="btnSaveSheetUrl" class="btn btn-success">💾 Lưu & Đồng bộ ngay</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bộ giải mã C++ WebAssembly siêu tốc nạp cục bộ (hoạt động cả khi mất mạng) -->
+  <script src="./vendor/zxing_wasm_reader.js?v=5"></script>
+  <script src="./catalog.js?v=5"></script>
+  <script src="./apps_script_embed.js?v=5"></script>
+  <script src="./app.js?v=5"></script>
+</body>
+</html>

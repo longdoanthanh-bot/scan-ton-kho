@@ -1,0 +1,9 @@
+Output_Backup/
+__pycache__/
+*.pyc
+kcs_verify.py
+server.py
+*.bat
+.DS_Store
+desktop.ini
+Thumbs.db

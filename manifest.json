@@ -1,0 +1,19 @@
+{
+  "name": "Quét Tồn Kho Tem Mã Vạch (Offline & Cloud)",
+  "short_name": "Scan Tồn Kho",
+  "description": "Ứng dụng quét tồn kho tem cân mã vạch sọc trên mọi Điện thoại & Máy PDA — Hoạt động cả khi mất mạng (Offline) và tự động cập nhật lên Google Sheet khi có mạng",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f2942",
+  "theme_color": "#0f2942",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "./icon-192.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
