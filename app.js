@@ -21,13 +21,16 @@
     maxNumberOfSymbols: 2
   };
 
+  const DEFAULT_SHEET_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxlF9UorbWyYzxFA4avEIkloBab44VZzqznaxTXSSTAZtb13QRp5GQoHb_KGCAnAayg/exec';
+  const DEFAULT_SHEET_VIEW_URL = 'https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0';
+
   // State
   let records = [];
   let catalogMap = {};
   let pendingOps = [];
   let settings = {
-    sheetWebAppUrl: '',
-    sheetViewUrl: 'https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0',
+    sheetWebAppUrl: DEFAULT_SHEET_WEB_APP_URL,
+    sheetViewUrl: DEFAULT_SHEET_VIEW_URL,
     soundEnabled: true,
     duplicateAskSec: 4,
     scalePrefixOnly: true
@@ -157,7 +160,7 @@
     renderAll();
 
     if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
-      navigator.serviceWorker.register('./sw.js?v=6').catch(function () {});
+      navigator.serviceWorker.register('./sw.js?v=7').catch(function () {});
     }
 
     window.addEventListener('online', function () {
@@ -217,6 +220,8 @@
         const parsed = JSON.parse(raw);
         settings = Object.assign(settings, parsed);
       }
+      if (!settings.sheetWebAppUrl) settings.sheetWebAppUrl = DEFAULT_SHEET_WEB_APP_URL;
+      if (!settings.sheetViewUrl) settings.sheetViewUrl = DEFAULT_SHEET_VIEW_URL;
     } catch (e) {}
   }
 
@@ -360,6 +365,8 @@
       if (vaultSettings && !settings.sheetWebAppUrl && vaultSettings.sheetWebAppUrl) {
         settings = Object.assign(settings, vaultSettings);
       }
+      if (!settings.sheetWebAppUrl) settings.sheetWebAppUrl = DEFAULT_SHEET_WEB_APP_URL;
+      if (!settings.sheetViewUrl) settings.sheetViewUrl = DEFAULT_SHEET_VIEW_URL;
     }
   }
 
