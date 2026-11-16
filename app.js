@@ -56,7 +56,7 @@
   let pendingDuplicateDateCtx = null;
   let dateOnlyTarget = 'latest';
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v12';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v13';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // Camera, WASM, Live Pre-Lock Radar & Async Offline OCR state
@@ -66,6 +66,10 @@
   let ocrQueuePromise = Promise.resolve();
   let activeDateReadsCount = 0;
   let readingDateRecordIds = {};
+  let readingDateStartedAt = {};
+  let nextOpUid = 1;
+  let inFlightOpUids = {};
+  let lastLiveAutoRescueAt = 0;
   let syncHoldTimer = null;
   let dateHoldSafetyTimer = null;
   let reconcileInFlight = false;
@@ -235,6 +239,9 @@
       const prevVer = localStorage.getItem(STORAGE_APP_VERSION);
       if (prevVer !== APP_CACHE_VERSION) {
         localStorage.setItem(STORAGE_APP_VERSION, APP_CACHE_VERSION);
+        if ('indexedDB' in window && window.indexedDB.deleteDatabase) {
+          try { window.indexedDB.deleteDatabase('keyval-store'); } catch (e) {}
+        }
         if ('caches' in window && navigator.onLine) {
           window.caches.keys().then(function (keys) {
             keys.forEach(function (k) {
@@ -253,8 +260,8 @@
     if (singleScanActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) return;
     pendingSwReload = false;
     try {
-      if (sessionStorage.getItem('sw_reloaded_v12') === '1') return;
-      sessionStorage.setItem('sw_reloaded_v12', '1');
+      if (sessionStorage.getItem('sw_reloaded_v13') === '1') return;
+      sessionStorage.setItem('sw_reloaded_v13', '1');
     } catch (e) {}
     window.location.reload();
   }
@@ -265,7 +272,7 @@
       return;
     }
     const hadPreviousController = Boolean(navigator.serviceWorker.controller);
-    navigator.serviceWorker.register('./sw.js?v=12', { updateViaCache: 'none' }).then(function (reg) {
+    navigator.serviceWorker.register('./sw.js?v=13', { updateViaCache: 'none' }).then(function (reg) {
       if (reg.waiting) {
         reg.waiting.postMessage('SKIP_WAITING');
       }
@@ -291,8 +298,8 @@
         return;
       }
       try {
-        if (sessionStorage.getItem('sw_reloaded_v12') === '1') return;
-        sessionStorage.setItem('sw_reloaded_v12', '1');
+        if (sessionStorage.getItem('sw_reloaded_v13') === '1') return;
+        sessionStorage.setItem('sw_reloaded_v13', '1');
       } catch (e) {}
       window.location.reload();
     });
@@ -301,7 +308,7 @@
   async function initApp() {
     purgeLegacyCachesOnce();
     warmUpWasmEngine();
-    setTimeout(function () { warmUpOcrWorker(); }, 80);
+    setTimeout(function () { warmUpOcrWorker(); }, 950);
 
     if (navigator.storage && navigator.storage.persist) {
       navigator.storage.persist().catch(function () {});
@@ -338,7 +345,7 @@
 
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
-        if (pendingOps.length > 0 && navigator.onLine && settings.sheetWebAppUrl && activeDateReadsCount === 0) {
+        if (pendingOps.length > 0 && navigator.onLine && settings.sheetWebAppUrl) {
           flushSyncQueue(false);
         }
       } else if (navigator.onLine && settings.sheetWebAppUrl) {
@@ -566,7 +573,15 @@
     updateSyncBadge();
   }
 
+  function ensureOpUid(op) {
+    if (op && !op._opUid) {
+      op._opUid = 'op_' + Date.now() + '_' + (nextOpUid++);
+    }
+    return op;
+  }
+
   function enqueueOp(op) {
+    ensureOpUid(op);
     pendingOps.push(op);
     persistPendingOps();
   }
@@ -592,6 +607,18 @@
       return '';
     }
 
+    // Dạng dd/MM/yy, dd.MM.yy, dd-MM-yy (tem cân in năm 2 số: 15.11.26 -> 15/11/2026)
+    m = s.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](2[4-9]|3[0-6])$/);
+    if (m) {
+      const d = parseInt(m[1], 10);
+      const mo = parseInt(m[2], 10);
+      const y = 2000 + parseInt(m[3], 10);
+      if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) {
+        return pad2(d) + '/' + pad2(mo) + '/' + y;
+      }
+      return '';
+    }
+
     // Dạng yyyy-MM-dd
     m = s.match(/^(20[23]\d)[.\/-](\d{1,2})[.\/-](\d{1,2})$/);
     if (m) {
@@ -604,12 +631,13 @@
       return '';
     }
 
-    // Dạng gõ nhanh 8 chữ số ddMMyyyy (VD: 12112026 -> 12/11/2026)
-    m = s.match(/^(\d{2})(\d{2})(20[23]\d)$/);
+    // Dạng gõ nhanh 8 chữ số ddMMyyyy (VD: 12112026 -> 12/11/2026) hoặc 6 chữ số ddMMyy (121126 -> 12/11/2026)
+    m = s.match(/^(\d{2})(\d{2})(20[23]\d|2[4-9]|3[0-6])$/);
     if (m) {
       const d = parseInt(m[1], 10);
       const mo = parseInt(m[2], 10);
-      const y = parseInt(m[3], 10);
+      const rawY = parseInt(m[3], 10);
+      const y = rawY < 100 ? (2000 + rawY) : rawY;
       if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12) {
         return pad2(d) + '/' + pad2(mo) + '/' + y;
       }
@@ -641,24 +669,27 @@
   }
 
   // =========================================================================
-  // BỘ ĐỌC TỰ ĐỘNG NSX & HSD TRÊN TEM MEATCOOL (BẢN v12 SIÊU TỐC: CHỐNG MỜ CẬN CẢNH, KHỬ SỌC MÀN HÌNH & TRIỆT TIÊU KẸT HÀNG ĐỢI)
+  // BỘ ĐỌC TỰ ĐỘNG NSX & HSD TRÊN TEM MEATCOOL & MỌI TEM CÂN KHO (BẢN v13 SIÊU TỐC: ĐA VÙNG THÔNG MINH, HỖ TRỢ MỌI LOẠI TEM & TỰ BÙ RẢNH TAY)
   // =========================================================================
-  const OCR_NSX_PREFIX_RE = /N\s*[S58]\s*X|[S58]\s*X\s*:|N\s*[DĐ]\s*G|MFG|PROD|NGAY\s*SX/;
-  const OCR_HSD_PREFIX_RE = /H\s*[S58]\s*[DO0]|[S58]\s*[DO0]\s*:|H\s*[DO0]\s*:|EXP|HAN\s*SD/;
-  const OCR_ANY_DATE_PREFIX_RE = /N\s*[S58]\s*X|H\s*[S58]\s*[DO0]|[S58]\s*X\s*:|[S58]\s*[DO0]\s*:|H\s*[DO0]\s*:|N\s*[DĐ]\s*G|MFG|EXP|PROD|NGAY|HAN/;
+  const OCR_NSX_PREFIX_RE = /N\s*[S58]\s*X|[S58]\s*X\s*:|N\s*[DĐ]\s*G|[DĐ]\s*G\s*:|DONG\s*GOI|MFG|PROD|NGAY\s*SX/;
+  const OCR_HSD_PREFIX_RE = /H\s*[S58]\s*[DO0]|[S58]\s*[DO0]\s*:|H\s*[DO0]\s*:|EXP|HAN\s*SD|SU\s*DUNG/;
+  const OCR_ANY_DATE_PREFIX_RE = /N\s*[S58]\s*X|H\s*[S58]\s*[DO0]|[S58]\s*X\s*:|[S58]\s*[DO0]\s*:|H\s*[DO0]\s*:|N\s*[DĐ]\s*G|[DĐ]\s*G\s*:|DONG\s*GOI|MFG|EXP|PROD|NGAY|HAN/;
 
   function parseOcrNsxHsdText(rawText) {
     const rawStr = String(rawText || '');
     if (!rawStr) return { nsx: '', hsd: '' };
 
-    // Làm sạch các ký tự chữ dễ bị nhận nhầm thành số 0/1 nằm sát dấu phân cách ngày (tương thích mọi đời iOS/Android/PDA)
+    // Làm sạch các ký tự chữ dễ bị lóa bóng nilông nhận nhầm thành số 0/1/5/6/8 nằm trong cụm ngày (tương thích mọi đời iOS/Android/PDA)
     const text = rawStr
       .replace(/([0-9.,\/:-])[Oo]([0-9.,\/:-])/g, '$10$2')
       .replace(/([0-9.,\/:-])[Oo]([0-9.,\/:-])/g, '$10$2')
       .replace(/([0-9])[Oo]\b/g, '$10')
+      .replace(/(20[23])[Gg6b]\b/g, '$16')
       .replace(/(^|[\s:])[Il|!](\s*[0-9][.,\/:-])/g, '$11$2')
       .replace(/([.,\/:-]\s*)[Il|!]([0-9])/g, '$11$2')
-      .replace(/([0-9])[Il|!](\s*[.,\/:-])/g, '$11$2');
+      .replace(/([0-9])[Il|!](\s*[.,\/:-])/g, '$11$2')
+      .replace(/(\b[0-2])[Ss](\s*[.,\/-]\s*[01]?\d)/g, '$15$2')
+      .replace(/(\b[0-2])B(\s*[.,\/-]\s*[01]?\d)/g, '$18$2');
 
     const pad2 = function (n) { return n < 10 ? ('0' + n) : String(n); };
     const found = [];
@@ -680,7 +711,7 @@
       ) {
         return;
       }
-      const prefixCtx = text.slice(Math.max(0, matchIndex - 40), matchIndex + 4).toUpperCase();
+      const prefixCtx = text.slice(Math.max(0, matchIndex - 48), matchIndex + 4).toUpperCase();
       if (requireLabelPrefix && !OCR_ANY_DATE_PREFIX_RE.test(prefixCtx) && found.length === 0) {
         return;
       }
@@ -693,8 +724,8 @@
       });
     }
 
-    // Lượt A: Bắt chuẩn ngày 4 số năm có dấu chấm, phẩy, gạch chéo, gạch ngang, hai chấm hoặc khoảng trắng (kể cả có khoảng trắng hai bên dấu chấm: 12 . 11 . 2026)
-    const regexSep = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])[.,\/:\-\s]{1,3}(0?[1-9]|1[0-2])[.,\/:\-\s]{1,3}(20[23]\d)(?!\d)/g;
+    // Lượt A: Bắt chuẩn ngày 4 số năm có dấu chấm, phẩy, gạch chéo, gạch ngang, hai chấm hoặc khoảng trắng (kể cả dấu chấm mờ thành khoảng trắng: 12 . 11 . 2026)
+    const regexSep = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])[.,\/:\-\s]{1,5}(0?[1-9]|1[0-2])[.,\/:\-\s]{1,5}(20[23]\d)(?!\d)/g;
     let m;
     while ((m = regexSep.exec(text)) !== null) {
       tryPushCandidate(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10), m.index, m[0].length, false);
@@ -719,10 +750,10 @@
       tryPushCandidate(parseInt(m[3], 10), parseInt(m[2], 10), parseInt(m[1], 10), m.index, m[0].length, false);
     }
 
-    // Lượt D: Hỗ trợ năm 2 chữ số (VD: NSX: 12.11.26) khi có dấu chấm/gạch rõ ràng và nhãn ngày đi kèm
+    // Lượt D: Hỗ trợ năm 2 chữ số trên tem cân siêu thị/kho (VD: 15.11.26, 15/11/26, 15-11-26) — bắt buộc có đủ 2 dấu phân cách ngày rõ ràng nên 0% nhầm số ký!
     const regexShortYear = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])\s*[.\/-]\s*(0?[1-9]|1[0-2])\s*[.\/-]\s*(2[4-9]|3[0-6])(?!\d)/g;
     while ((m = regexShortYear.exec(text)) !== null) {
-      tryPushCandidate(parseInt(m[1], 10), parseInt(m[2], 10), 2000 + parseInt(m[3], 10), m.index, m[0].length, true);
+      tryPushCandidate(parseInt(m[1], 10), parseInt(m[2], 10), 2000 + parseInt(m[3], 10), m.index, m[0].length, false);
     }
 
     if (found.length === 0) return { nsx: '', hsd: '' };
@@ -1213,8 +1244,10 @@
     const vMin = ((customBounds && typeof customBounds.vMin === 'number') ? customBounds.vMin : 0.34) * bw;
     const vSpan = ((customBounds && typeof customBounds.vSpan === 'number') ? customBounds.vSpan : 1.02) * bw;
 
-    // Phóng vùng chữ lên chuẩn 620px chiều ngang sọc (cao chữ ~31px — đúng điểm nét tối ưu của bộ đọc chữ, giữ nguyên khe hở chữ số 6)!
-    const scale = Math.min(3.4, Math.max(1.45, 620 / bw));
+    // Phóng vùng chữ lên chuẩn 620px chiều ngang sọc (hỗ trợ tới 5.6x cho tem cầm xa 30-45cm trên ống kính rộng ĐT, giữ nguyên khe hở chữ số 6)!
+    const targetBw = (customBounds && typeof customBounds.targetBw === 'number') ? customBounds.targetBw : 620;
+    const minScale = (customBounds && typeof customBounds.minScale === 'number') ? customBounds.minScale : 1.45;
+    const scale = Math.min(5.6, Math.max(minScale, targetBw / bw));
     const outW = Math.max(180, Math.round(uSpan * scale));
     const outH = Math.max(90, Math.round(vSpan * scale));
 
@@ -1319,9 +1352,90 @@
     return { nsx: mergedNsx, hsd: mergedHsd };
   }
 
+  // Đo nhanh điểm "giấy trắng có chữ mực đen" ở vùng dưới (+v) so với vùng trên (-v) của mã vạch (~0.15ms):
+  // Giúp nhận diện tức thì khi bộ đọc phần cứng Android trả về khung mã vạch bị ngược 180° hoặc cầm ngang 90°!
+  function preferFlipped180BarcodeSide(fullCanvas, rawPos) {
+    try {
+      const pos = normalizeBarcodePosMajorAxis(rawPos);
+      if (!fullCanvas || !pos) return false;
+      const dx = pos.topRight.x - pos.topLeft.x;
+      const dy = pos.topRight.y - pos.topLeft.y;
+      const bw = Math.hypot(dx, dy);
+      if (!bw || bw < 24) return false;
+
+      const scoreSide = function (degAdd) {
+        const angle = Math.atan2(dy, dx) + ((degAdd * Math.PI) / 180);
+        const cx = (pos.topLeft.x + pos.topRight.x + pos.bottomRight.x + pos.bottomLeft.x) / 4;
+        const cy = (pos.topLeft.y + pos.topRight.y + pos.bottomRight.y + pos.bottomLeft.y) / 4;
+        const sw = 48;
+        const sh = 28;
+        const tiny = document.createElement('canvas');
+        tiny.width = sw;
+        tiny.height = sh;
+        const tCtx = tiny.getContext('2d', { willReadFrequently: true });
+        tCtx.fillStyle = '#000000';
+        tCtx.fillRect(0, 0, sw, sh);
+        tCtx.save();
+        tCtx.scale(sw / (1.10 * bw), sh / (0.68 * bw));
+        tCtx.translate(0.78 * bw, -0.56 * bw);
+        tCtx.rotate(-angle);
+        tCtx.translate(-cx, -cy);
+        tCtx.drawImage(fullCanvas, 0, 0);
+        tCtx.restore();
+
+        const d = tCtx.getImageData(0, 0, sw, sh).data;
+        let brightCnt = 0;
+        let edgeSum = 0;
+        for (let y = 1; y < sh - 1; y++) {
+          const ro = y * sw;
+          let prev = (d[ro * 4] * 77 + d[ro * 4 + 1] * 150 + d[ro * 4 + 2] * 29) >> 8;
+          for (let x = 1; x < sw - 1; x++) {
+            const p = (ro + x) * 4;
+            const g = (d[p] * 77 + d[p + 1] * 150 + d[p + 2] * 29) >> 8;
+            if (g > 155) brightCnt++;
+            edgeSum += Math.abs(g - prev);
+            prev = g;
+          }
+        }
+        const total = (sw - 2) * (sh - 2);
+        return (brightCnt / total) * 100 + (edgeSum / total);
+      };
+
+      const s0 = scoreSide(0);
+      const s180 = scoreSide(180);
+      return s180 > s0 + 18;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function canvasHasTextContrast(c) {
+    try {
+      if (!c || c.width < 12 || c.height < 12) return true;
+      const ctx = c.getContext('2d', { willReadFrequently: true });
+      const sx = Math.floor(c.width * 0.08);
+      const sy = Math.floor(c.height * 0.10);
+      const sw = Math.max(8, Math.floor(c.width * 0.84));
+      const sh = Math.max(8, Math.floor(c.height * 0.80));
+      const d = ctx.getImageData(sx, sy, sw, sh).data;
+      let minG = 255;
+      let maxG = 0;
+      for (let i = 0; i < d.length; i += 16) {
+        const g = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+        if (g < minG) minG = g;
+        if (g > maxG) maxG = g;
+        if ((maxG - minG) >= 26) return true;
+      }
+      return (maxG - minG) >= 26;
+    } catch (e) {
+      return true;
+    }
+  }
+
   async function runQueuedOcrOnCanvas(worker, fullCanvas, barcodePos, allowTiltedFallback, cancelState, rescueAimCropCanvas) {
     let best = { nsx: '', hsd: '' };
     const DATE_WHITELIST = '0123456789.:/-NSXHD ';
+    const DIGITS_ONLY_WHITELIST = '0123456789./-: ';
     const isAborted = function () { return Boolean(cancelState && cancelState.aborted); };
     const recordHit = function (resObj) {
       const parsed = parseOcrNsxHsdText(resObj && resObj.data ? resObj.data.text : '');
@@ -1333,8 +1447,14 @@
     if (isAborted()) return best;
 
     // TRƯỜNG HỢP 1: ĐÃ BIẾT TỌA ĐỘ MÃ VẠCH (99% các ca quét Camera & Ảnh tem)
-    // Chỉ chạy trên các khung cắt nhỏ gọn quanh vùng ngày (~0.18s/lượt), TUYỆT ĐỐI không chạy khung khổng lồ 1320px gây treo điện thoại!
     if (barcodePos) {
+      // Vùng 0 (Siêu tốc ~55ms): Cắt riêng đúng cột chữ số ngày bên phải (tách sạch hoàn toàn dòng Khối lượng ở trên, khoảng trống giữa & ô vuông góc phải -> chống cong bao bì thịt 6Kg!)
+      const datesColRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
+        uMin: -0.44,
+        uSpan: 0.86,
+        vMin: 0.54,
+        vSpan: 0.74
+      });
       const rawRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0);
       const deepRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
         uMin: -0.96,
@@ -1343,24 +1463,26 @@
         vSpan: 1.24
       });
 
-      // 1A: Xám mịn độ phân giải cao ở góc 0° (giữ nguyên khe hở chữ số 6 khi chụp xa 35-50cm)
+      const bottomZoneHasInk = canvasHasTextContrast(datesColRoi);
+
+      // 1A: Xám mịn độ phân giải cao ở góc 0° (chuẩn chính xác 100%, giữ nguyên khe hở chữ số 6 khi chụp xa 35-50cm)
       await worker.setParameters({
         tessedit_pageseg_mode: '6',
         tessedit_char_whitelist: DATE_WHITELIST
       });
-      if (rawRoi && !isAborted()) {
+      if (bottomZoneHasInk && rawRoi && !isAborted()) {
         const resSoft = await worker.recognize(enhanceSoftGrayscaleCanvas(rawRoi));
         if (recordHit(resSoft)) return best;
       }
 
-      // 1B: Khôi phục nét chữ mờ cận cảnh 12-18cm / Camera 720p (~0.18s)
-      if (rawRoi && !isAborted()) {
+      // 1B: Khôi phục nét chữ mờ cận cảnh 12-18cm / Camera 720p (~0.15s)
+      if (bottomZoneHasInk && rawRoi && !isAborted()) {
         const resSharp = await worker.recognize(sharpenDefocusedTextCanvas(rawRoi));
         if (recordHit(resSharp)) return best;
       }
 
       // 1C: Tách chữ 2 cột thưa (PSM 11) + Khử bóng đổ / Khử sọc màn hình máy tính & góc chúc kéo dài dọc 1.18x (~0.2s)
-      if ((rawRoi || deepRoi) && !isAborted()) {
+      if (bottomZoneHasInk && (rawRoi || deepRoi) && !isAborted()) {
         await worker.setParameters({
           tessedit_pageseg_mode: '11',
           tessedit_char_whitelist: DATE_WHITELIST
@@ -1373,41 +1495,114 @@
           const resDeepFlat = await worker.recognize(flattenIlluminationToCanvas(deepRoi));
           if (recordHit(resDeepFlat)) return best;
         }
-        await worker.setParameters({
-          tessedit_pageseg_mode: '6',
-          tessedit_char_whitelist: DATE_WHITELIST
-        });
       }
 
-      if (deepRoi && !isAborted()) {
+      // 1C-2: Cắt riêng cột chữ số ngày bên phải (chống cong phồng bao bì thịt 6Kg làm lệch dòng giữa nhãn NSX: và dãy số!)
+      if (bottomZoneHasInk && datesColRoi && !isAborted()) {
+        await worker.setParameters({
+          tessedit_pageseg_mode: '6',
+          tessedit_char_whitelist: DIGITS_ONLY_WHITELIST
+        });
+        const resCol = await worker.recognize(flattenIlluminationToCanvas(datesColRoi));
+        if (recordHit(resCol)) return best;
+      }
+
+      await worker.setParameters({
+        tessedit_pageseg_mode: '6',
+        tessedit_char_whitelist: DATE_WHITELIST
+      });
+
+      // 1D: Bù góc nghiêng tay cầm dư [-4°, +4°, -8°, +8°] ngay lập tức (~0.14s/góc, chuẩn cho ảnh nghiêng 5°..20°)
+      if (bottomZoneHasInk) {
+        const tiltMicroAngles = [-4, 4, -8, 8];
+        for (let tIdx = 0; tIdx < tiltMicroAngles.length; tIdx++) {
+          if (isAborted()) return best;
+          const adjRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, tiltMicroAngles[tIdx]);
+          if (adjRoi) {
+            const resAdj = await worker.recognize(enhanceSoftGrayscaleCanvas(adjRoi));
+            if (recordHit(resAdj)) return best;
+          }
+        }
+      }
+
+      // 1E: Túi hàng đặt lộn ngược đầu [180°] hoặc cầm ngang 90° trên điện thoại Android (~0.16s)
+      if (!isAborted()) {
+        const roi180Col = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 180, {
+          uMin: -0.44,
+          uSpan: 0.86,
+          vMin: 0.54,
+          vSpan: 0.74
+        });
+        if (canvasHasTextContrast(roi180Col)) {
+          const roi180 = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 180);
+          if (roi180) {
+            const res180 = await worker.recognize(enhanceSoftGrayscaleCanvas(roi180));
+            if (recordHit(res180)) return best;
+            if (!isAborted()) {
+              const res180Sharp = await worker.recognize(sharpenDefocusedTextCanvas(roi180));
+              if (recordHit(res180Sharp)) return best;
+            }
+          }
+        }
+      }
+
+      if (bottomZoneHasInk && deepRoi && !isAborted()) {
         const resDeepSoft = await worker.recognize(enhanceSoftGrayscaleCanvas(deepRoi));
         if (recordHit(resDeepSoft)) return best;
       }
-      if ((deepRoi || rawRoi) && !isAborted()) {
+      if (bottomZoneHasInk && (deepRoi || rawRoi) && !isAborted()) {
         const resLcd = await worker.recognize(descreenLcdCanvas(deepRoi || rawRoi));
         if (recordHit(resLcd)) return best;
       }
 
-      // 1D: Bù góc nghiêng tay cầm dư [-4°, +4°, -8°, +8°] với bộ lọc xám mịn (chuẩn cho ảnh nghiêng 12°..20°)
-      const tiltMicroAngles = [-4, 4, -8, 8];
-      for (let tIdx = 0; tIdx < tiltMicroAngles.length; tIdx++) {
-        if (isAborted()) return best;
-        const adjRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, tiltMicroAngles[tIdx]);
-        if (adjRoi) {
-          const resAdj = await worker.recognize(enhanceSoftGrayscaleCanvas(adjRoi));
-          if (recordHit(resAdj)) return best;
+      // 1F: Mở rộng toàn chiều ngang tem cân kho/siêu thị (cho loại tem in NSX bên trái — HSD bên phải sang tận mép phải u=+0.9*bw hoặc năm 2 số!)
+      if (bottomZoneHasInk && !isAborted()) {
+        const wideScaleRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
+          uMin: -1.04,
+          uSpan: 2.08,
+          vMin: 0.36,
+          vSpan: 1.24,
+          targetBw: 400,
+          minScale: 1.0
+        });
+        if (wideScaleRoi) {
+          await worker.setParameters({
+            tessedit_pageseg_mode: '6',
+            tessedit_char_whitelist: DATE_WHITELIST
+          });
+          if (!isAborted()) {
+            const resWide6 = await worker.recognize(enhanceSoftGrayscaleCanvas(wideScaleRoi));
+            if (recordHit(resWide6)) return best;
+          }
+          await worker.setParameters({
+            tessedit_pageseg_mode: '11',
+            tessedit_char_whitelist: DATE_WHITELIST
+          });
+          if (!isAborted()) {
+            const resWideFlat = await worker.recognize(flattenIlluminationToCanvas(wideScaleRoi));
+            if (recordHit(resWideFlat)) return best;
+          }
         }
       }
 
-      // 1E: Túi hàng đặt lộn ngược đầu [180°] trên điện thoại Android
-      if (!isAborted()) {
-        const roi180 = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 180);
-        if (roi180) {
-          const res180 = await worker.recognize(enhanceSoftGrayscaleCanvas(roi180));
-          if (recordHit(res180)) return best;
+      // 1G: Dự phòng toàn mặt tem (cho ảnh chụp tem cân đặc thù in NSX/HSD phía TRÊN mã vạch!)
+      if (allowTiltedFallback && (!best.nsx || !best.hsd) && !isAborted()) {
+        const wholeLabelRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
+          uMin: -1.06,
+          uSpan: 2.12,
+          vMin: -1.02,
+          vSpan: 2.50,
+          targetBw: 360,
+          minScale: 0.95
+        });
+        if (wholeLabelRoi) {
+          await worker.setParameters({
+            tessedit_pageseg_mode: '11',
+            tessedit_char_whitelist: DATE_WHITELIST
+          });
           if (!isAborted()) {
-            const res180Sharp = await worker.recognize(sharpenDefocusedTextCanvas(roi180));
-            if (recordHit(res180Sharp)) return best;
+            const resWhole = await worker.recognize(flattenIlluminationToCanvas(wholeLabelRoi));
+            if (recordHit(resWhole)) return best;
           }
         }
       }
@@ -1623,21 +1818,46 @@
     commitParsedScan(parsed, resolvedDates, asyncDateContext || null);
   }
 
-  let inFlightOpsCount = 0;
+  function isOpHeldForDateRead(op) {
+    if (!op || op.type !== 'add' || !op.record || !op.record.id) return false;
+    const rid = op.record.id;
+    if (!readingDateRecordIds[rid]) return false;
+    const started = readingDateStartedAt[rid] || 0;
+    const maxHold = ocrWorkerResolved ? 4200 : 8500;
+    if (started > 0 && (Date.now() - started) >= maxHold) {
+      return false;
+    }
+    return true;
+  }
+
+  function hasAnyReadyPendingOps() {
+    for (let i = 0; i < pendingOps.length; i++) {
+      if (!isOpHeldForDateRead(pendingOps[i])) return true;
+    }
+    return false;
+  }
+
+  function hasAnyHeldPendingOps() {
+    for (let i = 0; i < pendingOps.length; i++) {
+      if (isOpHeldForDateRead(pendingOps[i])) return true;
+    }
+    return false;
+  }
 
   function armDateReadSyncSafetyTimer(maxWaitMs) {
     if (dateHoldSafetyTimer) {
       clearTimeout(dateHoldSafetyTimer);
       dateHoldSafetyTimer = null;
     }
+    const waitMs = maxWaitMs || (ocrWorkerResolved ? 4300 : 8600);
     dateHoldSafetyTimer = setTimeout(function () {
       dateHoldSafetyTimer = null;
       flushSyncQueue(false);
-    }, maxWaitMs || 2800);
+    }, waitMs);
   }
 
   function clearDateReadSyncSafetyTimerIfIdle() {
-    if (activeDateReadsCount <= 0 && dateHoldSafetyTimer) {
+    if (activeDateReadsCount <= 0 && !hasAnyHeldPendingOps() && dateHoldSafetyTimer) {
       clearTimeout(dateHoldSafetyTimer);
       dateHoldSafetyTimer = null;
     }
@@ -1648,22 +1868,24 @@
       clearTimeout(syncHoldTimer);
       syncHoldTimer = null;
     }
-    if (activeDateReadsCount > 0) {
-      armDateReadSyncSafetyTimer(2800);
+    if (hasAnyHeldPendingOps()) {
+      armDateReadSyncSafetyTimer();
+    } else {
+      clearDateReadSyncSafetyTimerIfIdle();
+    }
+    if (!hasAnyReadyPendingOps()) {
+      updateSyncBadge();
       return;
     }
-    clearDateReadSyncSafetyTimerIfIdle();
     if (!delayMs || delayMs <= 0) {
       flushSyncQueue(false);
       return;
     }
     syncHoldTimer = setTimeout(function () {
       syncHoldTimer = null;
-      if (activeDateReadsCount > 0) {
-        armDateReadSyncSafetyTimer(2800);
-        return;
+      if (hasAnyReadyPendingOps()) {
+        flushSyncQueue(false);
       }
-      flushSyncQueue(false);
     }, delayMs);
   }
 
@@ -1671,13 +1893,16 @@
     if (!recordId || !ctx || !ctx.frameCanvas) return;
     activeDateReadsCount += 1;
     readingDateRecordIds[recordId] = true;
+    if (!readingDateStartedAt[recordId]) {
+      readingDateStartedAt[recordId] = Date.now();
+    }
     let collected = { nsx: '', hsd: '' };
 
     try {
       const targetRec = records.find(function (r) { return r.id === recordId; });
       const expectedBarcode = (!ctx.ignoreBarcodeMismatch && targetRec) ? String(targetRec.rawBarcode || '') : '';
 
-      // Gom danh sách các khung hình ứng viên (ưu tiên khung thấy trọn vùng ngày bên dưới mã vạch & độ nét chữ cao nhất)
+      // Gom danh sách các khung hình ứng viên (ưu tiên khung độ nét gốc cao nhất thấy trọn vùng ngày bên dưới mã vạch)
       const candidates = [];
       if (Array.isArray(ctx.candidateFrames) && ctx.candidateFrames.length > 0) {
         for (let cIdx = 0; cIdx < ctx.candidateFrames.length; cIdx++) {
@@ -1689,6 +1914,14 @@
           canvas: ctx.frameCanvas,
           pos: ctx.barcodePos || null
         });
+      }
+      if (
+        ctx.liveVideo &&
+        ctx.liveVideo.readyState >= 2 &&
+        Math.max(ctx.liveVideo.videoWidth || 0, ctx.liveVideo.videoHeight || 0) > Math.max(ctx.frameCanvas.width, ctx.frameCanvas.height) * 1.12
+      ) {
+        const asyncHiRes = captureVideoToCanvas(ctx.liveVideo, null, 2400);
+        candidates.push({ canvas: asyncHiRes, pos: null });
       }
 
       for (let i = 0; i < candidates.length; i++) {
@@ -1712,20 +1945,22 @@
         }
 
         const rescueCrop = (!posUse) ? (ctx.rescueAimCropCanvas || cropCenterAimFromCanvas(item.canvas)) : null;
-        const allowFullTilt = posUse ? Boolean(ctx.allowTilt) : Boolean(ctx.ignoreBarcodeMismatch && ctx.allowTilt);
-        const budgetMs = posUse ? 3800 : (ctx.ignoreBarcodeMismatch ? 3800 : 2400);
+        const allowFullTilt = posUse ? Boolean(ctx.allowTilt && !ctx.liveVideo) : Boolean(ctx.ignoreBarcodeMismatch && ctx.allowTilt);
+        const budgetMs = posUse ? (ctx.liveVideo ? 1650 : 3800) : (ctx.ignoreBarcodeMismatch ? 3800 : 2200);
         const dRes = await extractNsxHsdWithTimeout(item.canvas, posUse, budgetMs, allowFullTilt, rescueCrop);
         collected = mergeDatePair(collected, dRes);
         if (collected.nsx && collected.hsd) break;
       }
 
-      // Nếu khung đầu bị rung tay hoặc che khuất lúc bấm chụp mà Camera vẫn đang mở -> kiểm tra nhanh khung kế tiếp:
-      // - Nếu đang ở chế độ quét thường (!ignoreBarcodeMismatch) mà người dùng đã hạ điện thoại xuống bàn phím/nền bàn (không thấy mã vạch) -> ngắt ngay 0ms, KHÔNG BAO GIỜ treo "⏳ Đang đọc..."!
+      // Nếu khung đầu bị rung tay hoặc ống kính điện thoại đang lấy nét lúc bấm chụp mà Camera vẫn đang mở:
+      // - Nếu người dùng đã hạ máy xuống bàn phím/mặt bàn (2 nhịp liên tiếp không thấy mã vạch ~0.25s) -> ngắt ngay tức khắc, KHÔNG BAO GIỜ treo "⏳ Đang đọc..."!
+      // - Nếu người dùng vẫn đang soi vào túi thịt (thấy đúng mã vạch) -> lấy tiếp tối đa 5 khung sắc nét dần theo nhịp lấy nét tự động (~0.1s..1.1s) cho tới khi đủ NSX & HSD!
       if ((!collected.nsx || !collected.hsd) && ctx.liveVideo) {
-        const maxFollowUps = ctx.ignoreBarcodeMismatch ? 1 : 2;
-        for (let f = 0; f < maxFollowUps; f++) {
+        const followDelays = ctx.ignoreBarcodeMismatch ? [120, 220] : [115, 175, 225, 260, 300];
+        let consecutiveNoBarcode = 0;
+        for (let f = 0; f < followDelays.length; f++) {
           if (!readingDateRecordIds[recordId]) break;
-          await new Promise(function (r) { setTimeout(r, f === 0 ? 105 : 135); });
+          await new Promise(function (r) { setTimeout(r, followDelays[f]); });
           if (!cameraActive || !mediaStream || !ctx.liveVideo || ctx.liveVideo.readyState < 2 || ctx.liveVideo.videoWidth <= 0) {
             break;
           }
@@ -1738,10 +1973,15 @@
               break;
             }
             if (!nextDet || !nextDet.pos) {
-              // Người dùng đã hạ điện thoại ra ngoài tem (VD: quay vào bàn phím máy tính) -> bỏ qua ngay, không chạy nhận diện chữ!
+              consecutiveNoBarcode += 1;
+              if (consecutiveNoBarcode >= 2) {
+                // Đã hạ điện thoại khỏi tem (VD: quay vào bàn phím máy tính) -> dừng hẳn ngay lập tức!
+                break;
+              }
               continue;
             }
-            const nextDates = await extractNsxHsdWithTimeout(nextCanvas, nextDet.pos, 2200, false, null);
+            consecutiveNoBarcode = 0;
+            const nextDates = await extractNsxHsdWithTimeout(nextCanvas, nextDet.pos, 2400, false, null);
             collected = mergeDatePair(collected, nextDates);
           } else {
             const rescueNextPos = nextDet ? nextDet.pos : null;
@@ -1755,6 +1995,7 @@
     } catch (e) {
     } finally {
       delete readingDateRecordIds[recordId];
+      delete readingDateStartedAt[recordId];
       activeDateReadsCount = Math.max(0, activeDateReadsCount - 1);
       clearDateReadSyncSafetyTimerIfIdle();
     }
@@ -1762,7 +2003,7 @@
     const rec = records.find(function (r) { return r.id === recordId; });
     if (!rec) {
       renderAll(false);
-      scheduleSyncFlush(35);
+      scheduleSyncFlush(25);
       setTimeout(checkPendingSwReload, 120);
       return;
     }
@@ -1781,10 +2022,15 @@
 
     if (changed) {
       let patchedInPlace = false;
-      const safeStartIdx = syncInProgress ? inFlightOpsCount : 0;
-      for (let i = pendingOps.length - 1; i >= safeStartIdx; i--) {
+      for (let i = pendingOps.length - 1; i >= 0; i--) {
         const op = pendingOps[i];
-        if ((op.type === 'add' || op.type === 'update') && op.record && op.record.id === recordId) {
+        if (
+          op &&
+          !inFlightOpUids[op._opUid] &&
+          (op.type === 'add' || op.type === 'update') &&
+          op.record &&
+          op.record.id === recordId
+        ) {
           op.record = toSyncRecord(rec);
           patchedInPlace = true;
           break;
@@ -1797,6 +2043,13 @@
       }
       persistRecords();
 
+      if (ctx.fromLiveAutoRescue) {
+        lastAutoSnappedCode = rec.rawBarcode || lastAutoSnappedCode;
+        lastAutoSnappedEpoch = Date.now();
+        playBeep('ok');
+        vibrateDevice([40]);
+      }
+
       if (records.length > 0 && records[records.length - 1].id === recordId) {
         showBanner(
           'ok',
@@ -1804,15 +2057,15 @@
           formatKg(rec.grams) + ' Kg | NSX: ' + formatLotDateDisplay(rec.nsx) + ' • HSD: ' + formatLotDateDisplay(rec.hsd)
         );
       }
-    } else if (!ctx.ignoreBarcodeMismatch && records.length > 0 && records[records.length - 1].id === recordId && (!rec.nsx || !rec.hsd)) {
+    } else if (!ctx.ignoreBarcodeMismatch && !ctx.fromLiveAutoRescue && records.length > 0 && records[records.length - 1].id === recordId && (!rec.nsx || !rec.hsd)) {
       showBanner(
         'warn',
-        '⚠️ Đã lưu ' + (rec.productName || ('Mã ' + rec.productCode)) + ' (' + formatKg(rec.grams) + ' Kg) nhưng khuất dòng NSX/HSD — Soi vào ngày rồi bấm "📷 Bù ngày"!'
+        '⚠️ Đã lưu ' + (rec.productName || ('Mã ' + rec.productCode)) + ' (' + formatKg(rec.grams) + ' Kg) nhưng khuất dòng NSX/HSD — Giữ tem trước Camera để tự bù hoặc bấm "📷 Bù ngày"!'
       );
     }
 
     renderAll(false);
-    scheduleSyncFlush(35);
+    scheduleSyncFlush(25);
     setTimeout(checkPendingSwReload, 120);
   }
 
@@ -1838,6 +2091,7 @@
 
     if (willReadDatesAsync) {
       readingDateRecordIds[record.id] = true;
+      readingDateStartedAt[record.id] = Date.now();
     }
 
     records.push(record);
@@ -1847,6 +2101,7 @@
     const kcs = verifyKcsIntegrity();
     if (!kcs.ok) {
       delete readingDateRecordIds[record.id];
+      delete readingDateStartedAt[record.id];
       showBanner('error', 'CẢNH BÁO KCS: ' + kcs.error);
       return;
     }
@@ -1871,8 +2126,8 @@
     renderAll(true);
 
     if (willReadDatesAsync) {
-      // Giữ nhịp đợi bộ đọc NSX/HSD hoàn tất (~0.3s) để gộp trọn Mã + Số ký + NSX + HSD đẩy lên Google Sheet ngay trong lần đầu tiên!
-      armDateReadSyncSafetyTimer(2800);
+      // Giữ nhịp đợi riêng cho từng dòng đang đọc NSX/HSD để gộp trọn Mã + Số ký + NSX + HSD đẩy lên Google Sheet ngay lần đầu!
+      armDateReadSyncSafetyTimer();
       setTimeout(function () {
         fillRecordDatesInBackground(record.id, asyncDateContext);
       }, 0);
@@ -2340,17 +2595,9 @@
   // UNIVERSAL CAMERA 1D SCANNER + AUTOMATIC NSX/HSD EXTRACTION
   // =========================================================================
   async function requestUniversalCameraStream() {
-    // Ưu tiên độ phân giải cao nhất của cảm biến (4K / 2K / FullHD) KHÔNG ép tốc độ 30 khung/giây
-    // (tránh lỗi nhiều dòng iPhone/Android tự hạ xuống 720p mờ chữ khi bị ép 30 khung/giây!)
+    // Ưu tiên chuẩn 2K QHD (2560x1440) & FullHD (1920x1080) trước 4K:
+    // Giúp mọi điện thoại iOS/Android lấy nét cận cảnh tự động (Macro/PDAF 10-15cm) nhanh gấp đôi và tốc độ màn trập nhanh không nhòe chữ NSX/HSD!
     const constraintsList = [
-      {
-        audio: false,
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 3840 },
-          height: { ideal: 2160 }
-        }
-      },
       {
         audio: false,
         video: {
@@ -2365,6 +2612,14 @@
           facingMode: { ideal: 'environment' },
           width: { ideal: 1920 },
           height: { ideal: 1080 }
+        }
+      },
+      {
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 3840 },
+          height: { ideal: 2160 }
         }
       },
       {
@@ -2448,7 +2703,7 @@
     viewportBox.style.display = 'flex';
 
     await warmUpWasmEngine();
-    warmUpOcrWorker();
+    setTimeout(function () { warmUpOcrWorker(); }, 950);
 
     if ('BarcodeDetector' in window && !nativeDetector) {
       try {
@@ -2534,8 +2789,8 @@
       iconEl.textContent = '📸';
       textEl.textContent = 'QUÉT';
       statusEl.textContent = settings.autoSnapCamera
-        ? '⚡ Tự chốt v12 đang BẬT: Giữ trọn tem 0.1s trong khung là tự đọc mã + NSX/HSD!'
-        : '👆 Bản v12: Đưa trọn tem vào khung → Bấm nút tròn chốt tức thì (tự đọc NSX/HSD)';
+        ? '⚡ Tự chốt v13 đang BẬT: Giữ trọn tem 0.1s trong khung là tự đọc mã + NSX/HSD!'
+        : '👆 Bản v13: Đưa trọn tem vào khung → Bấm nút tròn chốt tức thì (tự đọc NSX/HSD)';
     }
   }
 
@@ -2778,16 +3033,58 @@
     });
   }
 
-  function convertCornerPointsToPos(corners, scaleX, scaleY) {
-    if (!Array.isArray(corners) || corners.length < 4) return null;
+  function extractPosFromNativeHit(natHit, scaleX, scaleY) {
+    if (!natHit) return null;
     const sx = scaleX || 1;
     const sy = scaleY || 1;
-    return normalizeBarcodePosMajorAxis({
-      topLeft: { x: corners[0].x * sx, y: corners[0].y * sy },
-      topRight: { x: corners[1].x * sx, y: corners[1].y * sy },
-      bottomRight: { x: corners[2].x * sx, y: corners[2].y * sy },
-      bottomLeft: { x: corners[3].x * sx, y: corners[3].y * sy }
-    });
+    const corners = natHit.cornerPoints;
+    if (Array.isArray(corners) && corners.length >= 4) {
+      return normalizeBarcodePosMajorAxis({
+        topLeft: { x: corners[0].x * sx, y: corners[0].y * sy },
+        topRight: { x: corners[1].x * sx, y: corners[1].y * sy },
+        bottomRight: { x: corners[2].x * sx, y: corners[2].y * sy },
+        bottomLeft: { x: corners[3].x * sx, y: corners[3].y * sy }
+      });
+    }
+    if (Array.isArray(corners) && corners.length >= 2) {
+      const x0 = corners[0].x * sx;
+      const y0 = corners[0].y * sy;
+      const x1 = corners[1].x * sx;
+      const y1 = corners[1].y * sy;
+      const dx = x1 - x0;
+      const dy = y1 - y0;
+      const len = Math.hypot(dx, dy);
+      if (len >= 16) {
+        const nx = (-dy / len) * (len * 0.14);
+        const ny = (dx / len) * (len * 0.14);
+        return normalizeBarcodePosMajorAxis({
+          topLeft: { x: x0 - nx, y: y0 - ny },
+          topRight: { x: x1 - nx, y: y1 - ny },
+          bottomRight: { x: x1 + nx, y: y1 + ny },
+          bottomLeft: { x: x0 + nx, y: y0 + ny }
+        });
+      }
+    }
+    const bb = natHit.boundingBox;
+    if (bb) {
+      const bx = (typeof bb.x === 'number' ? bb.x : bb.left) * sx;
+      const by = (typeof bb.y === 'number' ? bb.y : bb.top) * sy;
+      const bw = (bb.width || 0) * sx;
+      const bh = (bb.height || 0) * sy;
+      if (bw >= 12 && bh >= 4) {
+        return normalizeBarcodePosMajorAxis({
+          topLeft: { x: bx, y: by },
+          topRight: { x: bx + bw, y: by },
+          bottomRight: { x: bx + bw, y: by + bh },
+          bottomLeft: { x: bx, y: by + bh }
+        });
+      }
+    }
+    return null;
+  }
+
+  function convertCornerPointsToPos(corners, scaleX, scaleY) {
+    return extractPosFromNativeHit({ cornerPoints: corners }, scaleX, scaleY);
   }
 
   async function tryDecodeRegionOnCanvas(workCanvas, workCtx, src, sx, sy, sw, sh, angleDeg, maxDim, padPx, doSharpen, useNative, needPosOnly) {
@@ -2826,13 +3123,16 @@
           for (let k = 0; k < natHits.length; k++) {
             const rawV = String(natHits[k].rawValue || '').trim();
             if (parseSingle13DigitScaleBarcode(rawV).ok) {
-              return {
-                code: rawV,
-                posOnWork: convertCornerPointsToPos(natHits[k].cornerPoints, 1, 1),
-                dw: dw,
-                dh: dh,
-                pad: pad
-              };
+              const natPos = extractPosFromNativeHit(natHits[k], 1, 1);
+              if (!needPosOnly || natPos) {
+                return {
+                  code: rawV,
+                  posOnWork: natPos,
+                  dw: dw,
+                  dh: dh,
+                  pad: pad
+                };
+              }
             }
           }
         }
@@ -2905,10 +3205,13 @@
           for (let k = 0; k < natHits.length; k++) {
             const rawV = String(natHits[k].rawValue || '').trim();
             if (parseSingle13DigitScaleBarcode(rawV).ok) {
-              return {
-                code: rawV,
-                pos: convertCornerPointsToPos(natHits[k].cornerPoints, 1, 1)
-              };
+              const natPos = extractPosFromNativeHit(natHits[k], 1, 1);
+              if (natPos) {
+                return {
+                  code: rawV,
+                  pos: natPos
+                };
+              }
             }
           }
         }
@@ -2958,10 +3261,13 @@
           for (let k = 0; k < natHits.length; k++) {
             const rawV = String(natHits[k].rawValue || '').trim();
             if (parseSingle13DigitScaleBarcode(rawV).ok) {
-              return {
-                code: rawV,
-                pos: convertCornerPointsToPos(natHits[k].cornerPoints, 1, 1)
-              };
+              const natPos = extractPosFromNativeHit(natHits[k], 1, 1);
+              if (natPos) {
+                return {
+                  code: rawV,
+                  pos: natPos
+                };
+              }
             }
           }
         }
@@ -3024,6 +3330,19 @@
     return det ? det.pos : null;
   }
 
+  function scalePosBetweenCanvases(pos, srcW, srcH, dstW, dstH) {
+    if (!pos || !srcW || !srcH || !dstW || !dstH) return pos || null;
+    if (srcW === dstW && srcH === dstH) return pos;
+    const rx = dstW / srcW;
+    const ry = dstH / srcH;
+    return normalizeBarcodePosMajorAxis({
+      topLeft: { x: pos.topLeft.x * rx, y: pos.topLeft.y * ry },
+      topRight: { x: pos.topRight.x * rx, y: pos.topRight.y * ry },
+      bottomRight: { x: pos.bottomRight.x * rx, y: pos.bottomRight.y * ry },
+      bottomLeft: { x: pos.bottomLeft.x * rx, y: pos.bottomLeft.y * ry }
+    });
+  }
+
   function startLivePreLockLoop() {
     const myLoopId = ++radarLoopId;
     const video = document.getElementById('cameraVideo');
@@ -3060,7 +3379,7 @@
                 if (chk.ok) {
                   foundCode = raw;
                   foundParsed = chk;
-                  foundPosOnFrame = convertCornerPointsToPos(vHits[k].cornerPoints, 1, 1);
+                  foundPosOnFrame = extractPosFromNativeHit(vHits[k], 1, 1);
                   break;
                 }
               }
@@ -3135,7 +3454,7 @@
           }
           autoSnapStreakLastAt = nowTick;
 
-          // Giữ lại khung sắc nét nhất thấy trọn cả vùng NSX/HSD của cùng tem này (chỉ nhân bản khung hình khi thực sự cần cập nhật!)
+          // Giữ lại khung sắc nét nhất thấy trọn cả vùng NSX/HSD của cùng tem này
           if (
             livePreLock &&
             livePreLock.code === foundCode &&
@@ -3158,6 +3477,41 @@
           const viewportBox = document.getElementById('cameraViewportBox');
           const statusEl = document.getElementById('cameraStatusBadge');
 
+          // TỰ BÙ RẢNH TAY THÔNG MINH: Nếu tem vừa quét (trong 25 giây gần nhất) có đúng mã vạch 13 số này mà lúc đầu bị mờ/khuất chưa có NSX/HSD,
+          // chỉ cần giữ ống kính trước tem là máy TỰ ĐỘNG đọc bù NSX/HSD điền thẳng vào dòng đó & đẩy lên Sheet (không tạo dòng trùng rỗng)!
+          const latestRec = records.length > 0 ? records[records.length - 1] : null;
+          const sameLatestMissingDates = Boolean(
+            latestRec &&
+            latestRec.rawBarcode === foundCode &&
+            (!latestRec.nsx || !latestRec.hsd) &&
+            (nowTick - lastScannedEpoch) < 25000
+          );
+
+          if (
+            sameLatestMissingDates &&
+            !readingDateRecordIds[latestRec.id] &&
+            dateInFrame &&
+            (nowTick - lastLiveAutoRescueAt) > 950
+          ) {
+            lastLiveAutoRescueAt = nowTick;
+            lastAutoSnappedCode = foundCode;
+            lastAutoSnappedEpoch = nowTick;
+            const frozenRescue = cloneCanvas(radarFrameCanvas);
+            readingDateRecordIds[latestRec.id] = true;
+            readingDateStartedAt[latestRec.id] = nowTick;
+            renderAll(false);
+            fillRecordDatesInBackground(latestRec.id, {
+              frameCanvas: frozenRescue,
+              barcodePos: mappedPos,
+              candidateFrames: [
+                { canvas: frozenRescue, pos: mappedPos }
+              ],
+              liveVideo: video,
+              allowTilt: true,
+              fromLiveAutoRescue: true
+            });
+          }
+
           let holdAutoSnapForDates = false;
           if (!livePreLock.dateInFrame) {
             if (edgeClipHoldCode !== foundCode) {
@@ -3172,11 +3526,12 @@
             edgeClipHoldSince = 0;
           }
 
-          // Chế độ ⚡ Tự chốt: Đợi đúng 2 nhịp bắt nét liên tiếp (~0.09 giây) để tay dừng lướt -> chữ NSX/HSD nét căng không bị nhòe!
+          // Chế độ ⚡ Tự chốt: Đợi đúng 2 nhịp bắt nét liên tiếp (~0.09 giây) + lấy khung độ nét gốc 2400px!
           if (
             settings.autoSnapCamera &&
             autoSnapStreakCount >= 2 &&
             !holdAutoSnapForDates &&
+            !sameLatestMissingDates &&
             nowTick >= shutterLockUntil &&
             !(foundCode === lastAutoSnappedCode && (nowTick - lastAutoSnappedEpoch) < 4200)
           ) {
@@ -3193,7 +3548,9 @@
             handleBarcodeInput(snapUse.code, 'Camera Auto', null, {
               frameCanvas: snapUse.frameCanvas,
               barcodePos: snapUse.barcodePos,
-              candidateFrames: [{ canvas: snapUse.frameCanvas, pos: snapUse.barcodePos }],
+              candidateFrames: [
+                { canvas: snapUse.frameCanvas, pos: snapUse.barcodePos }
+              ],
               liveVideo: video,
               allowTilt: true
             });
@@ -3206,15 +3563,17 @@
             viewportBox.classList.add('is-prelocked');
             statusEl.textContent = !dateInFrame
               ? ('📐 Đã thấy mã ' + foundParsed.productCode + ' — Hạ nhẹ khung xuống để thấy trọn dòng NSX/HSD bên dưới!')
-              : ('🟢 Đã bắt nét: ' + (foundParsed.productName || ('Mã ' + foundParsed.productCode)) +
-                ' (' + formatKg(foundParsed.grams) + ' Kg) — Bấm nút tròn chốt ngay!');
+              : (sameLatestMissingDates
+                ? ('⏳ Đang tự đọc bù NSX/HSD cho ' + (foundParsed.productName || foundParsed.productCode) + ' — Giữ yên 0.3s!')
+                : ('🟢 Đã bắt nét: ' + (foundParsed.productName || ('Mã ' + foundParsed.productCode)) +
+                  ' (' + formatKg(foundParsed.grams) + ' Kg) — Bấm nút tròn chốt ngay!'));
           }
         } else {
           if ((Date.now() - autoSnapStreakLastAt) > 450) {
             autoSnapStreakCount = 0;
             autoSnapStreakCode = '';
           }
-          if (livePreLock && (Date.now() - livePreLock.lockedAt) > 680) {
+          if (livePreLock && (Date.now() - livePreLock.lockedAt) > 980) {
             livePreLock = null;
             const viewportBox = document.getElementById('cameraViewportBox');
             if (viewportBox && viewportBox.classList.contains('is-prelocked')) {
@@ -3242,8 +3601,8 @@
     if (!cameraActive || !mediaStream) return;
     const video = document.getElementById('cameraVideo');
 
-    // Chốt 0.00 giây nếu bộ bắt nét ngầm đã khóa sẵn mã hợp lệ trong 0.68 giây gần nhất!
-    if (livePreLock && (Date.now() - livePreLock.lockedAt) <= 680) {
+    // Chốt 0.00 giây nếu bộ bắt nét ngầm đã khóa sẵn mã hợp lệ trong 0.98 giây gần nhất!
+    if (livePreLock && (Date.now() - livePreLock.lockedAt) <= 980) {
       const snap = livePreLock;
       livePreLock = null;
       shutterLockUntil = Date.now() + 180;
@@ -3312,7 +3671,7 @@
             const vHits = await nativeDetector.detect(frozenCanvas);
             if (vHits && vHits.length > 0 && vHits[0].rawValue) {
               candidate = String(vHits[0].rawValue).trim();
-              posOnFrozen = convertCornerPointsToPos(vHits[0].cornerPoints, 1, 1);
+              posOnFrozen = extractPosFromNativeHit(vHits[0], 1, 1);
             }
           } catch (e) {}
         }
@@ -4112,9 +4471,32 @@
       return;
     }
 
+    const readyBatch = [];
+    for (let i = 0; i < pendingOps.length; i++) {
+      ensureOpUid(pendingOps[i]);
+      if (!isOpHeldForDateRead(pendingOps[i])) {
+        readyBatch.push(pendingOps[i]);
+      }
+    }
+    if (readyBatch.length === 0) {
+      if (hasAnyHeldPendingOps()) {
+        armDateReadSyncSafetyTimer();
+      }
+      updateSyncBadge();
+      return;
+    }
+
     syncInProgress = true;
-    const opsBatch = pendingOps.slice();
-    inFlightOpsCount = opsBatch.length;
+    inFlightOpUids = {};
+    const cleanWireBatch = [];
+    for (let i = 0; i < readyBatch.length; i++) {
+      const item = readyBatch[i];
+      inFlightOpUids[item._opUid] = true;
+      const wireOp = { type: item.type };
+      if (item.id !== undefined) wireOp.id = item.id;
+      if (item.record !== undefined) wireOp.record = item.record;
+      cleanWireBatch.push(wireOp);
+    }
     updateSyncBadge();
 
     let hadError = false;
@@ -4122,13 +4504,15 @@
       const catalogArray = Object.keys(catalogMap).map(function (k) { return catalogMap[k]; });
       const res = await postToGoogleSheet({
         action: 'sync_ops',
-        ops: opsBatch,
+        ops: cleanWireBatch,
         catalog: catalogArray
       });
 
       if (res && res.ok) {
-        pendingOps = pendingOps.slice(opsBatch.length);
-        inFlightOpsCount = 0;
+        pendingOps = pendingOps.filter(function (op) {
+          return !(op && op._opUid && inFlightOpUids[op._opUid]);
+        });
+        inFlightOpUids = {};
         if (res.sheetUrl && !settings.sheetViewUrl) {
           settings.sheetViewUrl = res.sheetUrl;
           saveSettings();
@@ -4140,10 +4524,10 @@
           applyAuthoritativeSheetRecords(res.records, false);
         }
 
-        if (fromAutoReconnect && opsBatch.length > 0) {
+        if (fromAutoReconnect && cleanWireBatch.length > 0) {
           showBanner(
             'ok',
-            '🌐 Đã có mạng trở lại! Đã tự động cập nhật ' + opsBatch.length + ' thao tác tồn kho lên Google Sheet!'
+            '🌐 Đã có mạng trở lại! Đã tự động cập nhật ' + cleanWireBatch.length + ' thao tác tồn kho lên Google Sheet!'
           );
         }
       } else {
@@ -4162,13 +4546,15 @@
       }
     } finally {
       syncInProgress = false;
-      inFlightOpsCount = 0;
+      inFlightOpUids = {};
       if (!hadError || pendingOps.length === 0) {
         updateSyncBadge();
       }
-      // BẮT BUỘC: Nếu trong lúc đang đẩy lên Google Sheet mà có thao tác cập nhật NSX/HSD hoặc tem mới phát sinh -> tự động đẩy tiếp ngay lập tức!
-      if (!hadError && pendingOps.length > 0 && navigator.onLine && activeDateReadsCount === 0) {
-        setTimeout(function () { flushSyncQueue(false); }, 80);
+      // BẮT BUỘC: Bất kỳ thao tác đã hoàn tất nào (kể cả cập nhật NSX/HSD của tem trước trong lúc đang quét tem kế tiếp!) đều phải đẩy ngay tức khắc!
+      if (!hadError && navigator.onLine && hasAnyReadyPendingOps()) {
+        setTimeout(function () { flushSyncQueue(false); }, 65);
+      } else if (!hadError && hasAnyHeldPendingOps()) {
+        armDateReadSyncSafetyTimer();
       } else if (pendingOps.length === 0 && activeDateReadsCount === 0) {
         setTimeout(checkPendingSwReload, 120);
       }

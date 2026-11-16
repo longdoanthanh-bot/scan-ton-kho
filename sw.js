@@ -1,4 +1,4 @@
-const CACHE_NAME = 'scan-ton-kho-v12';
+const CACHE_NAME = 'scan-ton-kho-v13';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -88,14 +88,15 @@ self.addEventListener('fetch', function (event) {
   ) {
     var cleanUrl = url.replace(/([^:]\/)\/+/g, '$1');
     event.respondWith(
-      caches.match(cleanUrl, { ignoreSearch: true }).then(function (cached) {
-        if (cached) return cached;
-        return fetch(cleanUrl).then(function (netResp) {
-          if (netResp && netResp.ok) {
-            var copy = netResp.clone();
-            caches.open(CACHE_NAME).then(function (c) { c.put(cleanUrl, copy); });
-          }
-          return netResp;
+      caches.open(CACHE_NAME).then(function (cache) {
+        return cache.match(cleanUrl, { ignoreSearch: true }).then(function (cached) {
+          if (cached) return cached;
+          return fetch(cleanUrl).then(function (netResp) {
+            if (netResp && netResp.ok) {
+              cache.put(cleanUrl, netResp.clone());
+            }
+            return netResp;
+          });
         });
       })
     );

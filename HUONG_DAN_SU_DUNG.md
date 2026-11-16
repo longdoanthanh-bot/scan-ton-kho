@@ -1,4 +1,4 @@
-# 📦 HƯỚNG DẪN SỬ DỤNG APP QUÉT TỒN KHO TEM MÃ VẠCH — BẢN v12 SIÊU TỐC
+# 📦 HƯỚNG DẪN SỬ DỤNG APP QUÉT TỒN KHO TEM MÃ VẠCH — BẢN v13 SIÊU TỐC
 
 Ứng dụng quét **dải mã vạch sọc 13 số** kết hợp **tự động đọc Ngày sản xuất (NSX) & Hạn sử dụng (HSD)** trên tem cân (ví dụ: `1010040051985` → Mã sản phẩm `10040` - *Chân giò heo trước*, Khối lượng `5.198 Kg`, `NSX: 12/11/2026`, `HSD: 15/11/2026`), **khóa cứng không quét nhầm ô vuông ở góc tem**, hoạt động **100% cả khi mất mạng** và **tự động đồng bộ 2 chiều với Google Sheet `SCAN TỒN`**.
 
@@ -26,7 +26,8 @@ Chỉ cần điện thoại hoặc máy kiểm kho cầm tay (PDA) có 4G / 5G /
    - Máy **kêu bíp & chốt ngay Mã SP + Số ký trong `~0.1 giây`**.
    - Hai dòng **`NSX` & `HSD`** được tự động đọc ngay phía sau (`~0.3–0.8 giây`) rồi **gộp chung đẩy thẳng lên bảng tính Google Sheet `SCAN TỒN`**.
 3. **Trường hợp túi thịt bị nhăn gập làm che chữ ngày lúc quét**:
-   - Bấm ngay nút xanh **`📷 Bù ngày`** hiện nổi trên góc phải khung Camera (hoặc dưới thẻ *Tem vừa quét*) và soi vào 2 dòng `NSX / HSD` → máy chụp bù trực tiếp và cập nhật ngay lên bảng tính!
+   - **Tự bù rảnh tay (không cần bấm nút)**: Chỉ cần vuốt phẳng tem và giữ trước ống kính khoảng nửa giây, máy sẽ **tự động đọc bù `NSX / HSD` điền thẳng vào dòng vừa quét** (không tạo dòng trùng rỗng) và đẩy lên Google Sheet!
+   - Hoặc bấm nút xanh **`📷 Bù ngày`** hiện nổi trên góc phải khung Camera và soi vào 2 dòng `NSX / HSD`.
 
 ---
 
