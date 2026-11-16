@@ -57,12 +57,16 @@
   let dateOnlyTarget = 'latest';
   let currentSummaryDim = 'sku_date';
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v16';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v17';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
-  // Camera, WASM, Live Pre-Lock Radar & Async Offline OCR state
+  // Camera, WASM, Live Pre-Lock Radar, Batch Photo Upload & Async Offline OCR state
   let wasmReadyPromise = null;
   let nativeDetectorInitPromise = null;
+  let batchProcessingActive = false;
+  let batchCancelRequested = false;
+  let rearVideoDevices = [];
+  let selectedRearDeviceIdx = -1;
   let ocrWorkerPromise = null;
   let ocrWorkerResolved = false;
   let ocrQueuePromise = Promise.resolve();
@@ -159,16 +163,27 @@
   document.addEventListener('DOMContentLoaded', initApp);
 
   function ensureNativeBarcodeDetector() {
-    if (nativeDetector) return Promise.resolve(nativeDetector);
+    if (!('BarcodeDetector' in window) || !window.BarcodeDetector) {
+      nativeDetector = null;
+      nativeDetectorInitPromise = null;
+      return Promise.resolve(null);
+    }
+    const Ctor = window.BarcodeDetector;
+    if (nativeDetector && nativeDetector._ctor === Ctor) return Promise.resolve(nativeDetector);
+    if (nativeDetector && nativeDetector._ctor !== Ctor) {
+      nativeDetector = null;
+      nativeDetectorInitPromise = null;
+    }
     if (nativeDetectorInitPromise) return nativeDetectorInitPromise;
-    if (!('BarcodeDetector' in window)) return Promise.resolve(null);
-    nativeDetectorInitPromise = window.BarcodeDetector.getSupportedFormats().then(function (supported) {
+    nativeDetectorInitPromise = Ctor.getSupportedFormats().then(function (supported) {
       const formats1D = ['ean_13', 'code_128', 'ean_8', 'itf', 'upc_a'].filter(function (f) {
         return supported.indexOf(f) !== -1;
       });
       if (formats1D.length > 0) {
-        nativeDetector = new window.BarcodeDetector({ formats: formats1D });
+        nativeDetector = new Ctor({ formats: formats1D });
+        try { nativeDetector._ctor = Ctor; } catch (e) {}
       }
+      nativeDetectorInitPromise = null;
       return nativeDetector;
     }).catch(function () {
       nativeDetectorInitPromise = null;
@@ -278,11 +293,11 @@
 
   function checkPendingSwReload() {
     if (!pendingSwReload) return;
-    if (singleScanActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) return;
+    if (singleScanActive || batchProcessingActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) return;
     pendingSwReload = false;
     try {
-      if (sessionStorage.getItem('sw_reloaded_v16') === '1') return;
-      sessionStorage.setItem('sw_reloaded_v16', '1');
+      if (sessionStorage.getItem('sw_reloaded_v17') === '1') return;
+      sessionStorage.setItem('sw_reloaded_v17', '1');
     } catch (e) {}
     window.location.reload();
   }
@@ -293,7 +308,7 @@
       return;
     }
     const hadPreviousController = Boolean(navigator.serviceWorker.controller);
-    navigator.serviceWorker.register('./sw.js?v=16', { updateViaCache: 'none' }).then(function (reg) {
+    navigator.serviceWorker.register('./sw.js?v=17', { updateViaCache: 'none' }).then(function (reg) {
       if (reg.waiting) {
         reg.waiting.postMessage('SKIP_WAITING');
       }
@@ -314,13 +329,13 @@
 
     navigator.serviceWorker.addEventListener('controllerchange', function () {
       if (!hadPreviousController) return;
-      if (singleScanActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) {
+      if (singleScanActive || batchProcessingActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) {
         pendingSwReload = true;
         return;
       }
       try {
-        if (sessionStorage.getItem('sw_reloaded_v16') === '1') return;
-        sessionStorage.setItem('sw_reloaded_v16', '1');
+        if (sessionStorage.getItem('sw_reloaded_v17') === '1') return;
+        sessionStorage.setItem('sw_reloaded_v17', '1');
       } catch (e) {}
       window.location.reload();
     });
@@ -345,7 +360,9 @@
     updateOfflineBannerUI();
     refreshSettingsSheetLinkUI();
 
-    if (window.location.hash === '#camera') {
+    if (window.location.hash === '#batch') {
+      applyModeUI('batch');
+    } else if (window.location.hash === '#camera') {
       applyModeUI('camera');
     } else {
       applyModeUI('pda');
@@ -384,7 +401,7 @@
     // - Có mục Offline chờ -> tự đẩy lên Sheet
     // - Xóa / sửa dòng trực tiếp trên Google Sheet -> App tự cập nhật khớp tức thì!
     setInterval(function () {
-      if (!document.hidden && navigator.onLine && settings.sheetWebAppUrl && !singleScanActive && activeDateReadsCount === 0) {
+      if (!document.hidden && navigator.onLine && settings.sheetWebAppUrl && !singleScanActive && !batchProcessingActive && activeDateReadsCount === 0) {
         reconcileWithGoogleSheet(false, false);
       }
     }, 5000);
@@ -1868,15 +1885,16 @@
           }
         }
 
-        // 1E: Bù góc nghiêng tay cầm điện thoại [-6°, +6°, -13°, +13°] trên khung gọn 460px siêu tốc (~95ms/lượt!)
-        const tiltMicroAngles = [-6, 6, -13, 13];
+        // 1E: Bù góc nghiêng tay cầm điện thoại (Camera trực tiếp quét gọn [-7°, +7°] PSM 11 ~180ms để ngắt nhanh khi hạ máy; Ảnh tĩnh/Loạt ảnh quét sâu [-7°, +7°, -13°, +13°] vSpan=1.18!)
+        const tiltMicroAngles = allowTiltedFallback ? [-7, 7, -13, 13] : [-7, 7];
+        const tiltVSpan = allowTiltedFallback ? 1.18 : 1.04;
         for (let tIdx = 0; tIdx < tiltMicroAngles.length; tIdx++) {
           if (isAborted()) return best;
           const adjB2b = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, tiltMicroAngles[tIdx], {
             uMin: -0.96,
             uSpan: 1.38,
             vMin: 0.34,
-            vSpan: 0.94,
+            vSpan: tiltVSpan,
             targetBw: 460,
             minScale: 1.15
           });
@@ -1888,7 +1906,7 @@
             });
             const resAdj11 = await worker.recognize(adjSoft);
             if (recordHit(resAdj11)) return best;
-            if (!isAborted()) {
+            if (allowTiltedFallback && !isAborted()) {
               await worker.setParameters({
                 tessedit_pageseg_mode: '6',
                 tessedit_char_whitelist: DATE_WHITELIST
@@ -2076,7 +2094,7 @@
     if (recordHit(resFull0)) return best;
 
     if (allowTiltedFallback && (!best.nsx || !best.hsd) && !isAborted()) {
-      const angles = [-14, 14, 180];
+      const angles = [-7, 7, -14, 14, 180];
       for (let i = 0; i < angles.length; i++) {
         if (isAborted()) return best;
         const tiltedCanvas = buildFullFrameDateCanvas(fullCanvas, angles[i]);
@@ -2266,7 +2284,7 @@
     const rid = op.record.id;
     if (!readingDateRecordIds[rid]) return false;
     const started = readingDateStartedAt[rid] || 0;
-    const maxHold = ocrWorkerResolved ? 4200 : 8500;
+    const maxHold = ocrWorkerResolved ? 6800 : 9500;
     if (started > 0 && (Date.now() - started) >= maxHold) {
       return false;
     }
@@ -2292,7 +2310,7 @@
       clearTimeout(dateHoldSafetyTimer);
       dateHoldSafetyTimer = null;
     }
-    const waitMs = maxWaitMs || (ocrWorkerResolved ? 4300 : 8600);
+    const waitMs = maxWaitMs || (ocrWorkerResolved ? 6900 : 9600);
     dateHoldSafetyTimer = setTimeout(function () {
       dateHoldSafetyTimer = null;
       flushSyncQueue(false);
@@ -2401,8 +2419,12 @@
         }
 
         const rescueCrop = (!posUse) ? (ctx.rescueAimCropCanvas || cropCenterAimFromCanvas(item.canvas)) : null;
-        const allowFullTilt = posUse ? Boolean(ctx.allowTilt && !ctx.liveVideo) : Boolean(ctx.ignoreBarcodeMismatch && ctx.allowTilt);
-        const budgetMs = posUse ? (ctx.liveVideo ? 2600 : 4000) : (ctx.ignoreBarcodeMismatch ? 3600 : 2000);
+        const allowFullTilt = posUse
+          ? Boolean(ctx.allowTilt && !ctx.liveVideo)
+          : Boolean((!ctx.liveVideo || ctx.ignoreBarcodeMismatch) && ctx.allowTilt);
+        const budgetMs = posUse
+          ? (ctx.liveVideo ? 1850 : 5800)
+          : (!ctx.liveVideo ? 5200 : (ctx.ignoreBarcodeMismatch ? 3800 : 1850));
         const dRes = await extractNsxHsdWithTimeout(item.canvas, posUse, budgetMs, allowFullTilt, rescueCrop, shouldAbortInitial);
         collected = mergeDatePair(collected, dRes);
         if (collected.nsx && collected.hsd && !collected.suspectYearGap) break;
@@ -3330,7 +3352,66 @@
   // =========================================================================
   // UNIVERSAL CAMERA 1D SCANNER + AUTOMATIC NSX/HSD EXTRACTION
   // =========================================================================
+  async function refreshRearLensList() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      const vids = all.filter(function (d) { return d && d.kind === 'videoinput'; });
+      const rears = vids.filter(function (d) {
+        const lbl = String(d.label || '').toLowerCase();
+        return lbl.indexOf('back') !== -1 || lbl.indexOf('rear') !== -1 || lbl.indexOf('environment') !== -1 || lbl.indexOf('sau') !== -1;
+      });
+      rearVideoDevices = rears.length >= 2 ? rears : (vids.length >= 3 ? vids.slice(1) : []);
+      const btnLens = document.getElementById('btnSwitchLens');
+      if (btnLens) {
+        if (rearVideoDevices.length >= 2) {
+          btnLens.style.display = 'inline-flex';
+          const curIdx = selectedRearDeviceIdx >= 0 ? (selectedRearDeviceIdx % rearVideoDevices.length) : 0;
+          btnLens.textContent = '🔄 Ống kính (' + (curIdx + 1) + '/' + rearVideoDevices.length + ')';
+        } else {
+          btnLens.style.display = 'none';
+        }
+      }
+    } catch (e) {}
+  }
+
+  async function cycleRearCameraLens() {
+    await refreshRearLensList();
+    if (rearVideoDevices.length < 2) {
+      showBanner('warn', 'Điện thoại này chỉ mở 1 ống kính trên trình duyệt — Hãy dùng mục "📚 Loạt ảnh" hoặc bấm "📷 Máy ảnh gốc" để lấy nét cận cảnh tốt nhất!');
+      return;
+    }
+    selectedRearDeviceIdx = (selectedRearDeviceIdx + 1) % rearVideoDevices.length;
+    const chosen = rearVideoDevices[selectedRearDeviceIdx];
+    showBanner('ok', '🔄 Đang chuyển sang ống kính ' + (selectedRearDeviceIdx + 1) + '/' + rearVideoDevices.length + (chosen.label ? (' (' + chosen.label + ')') : '') + '...');
+    await startCamera1DScanner();
+  }
+
   async function requestUniversalCameraStream() {
+    // Nếu người dùng đã bấm nút Đổi ống kính (VD: chuyển sang ống kính góc rộng / lấy nét gần Macro trên điện thoại nhiều mắt camera) -> mở đúng ống kính đó!
+    if (selectedRearDeviceIdx >= 0 && rearVideoDevices.length >= 2) {
+      const targetDev = rearVideoDevices[selectedRearDeviceIdx % rearVideoDevices.length];
+      if (targetDev && targetDev.deviceId) {
+        try {
+          return await navigator.mediaDevices.getUserMedia({
+            audio: false,
+            video: {
+              deviceId: { exact: targetDev.deviceId },
+              width: { ideal: 2560 },
+              height: { ideal: 1440 }
+            }
+          });
+        } catch (e) {
+          try {
+            return await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: { deviceId: { exact: targetDev.deviceId } }
+            });
+          } catch (e2) {}
+        }
+      }
+    }
+
     // Ưu tiên chuẩn 2K QHD (2560x1440) & FullHD (1920x1080) trước 4K:
     // Giúp mọi điện thoại iOS/Android lấy nét cận cảnh tự động (Macro/PDAF 10-15cm) nhanh gấp đôi và tốc độ màn trập nhanh không nhòe chữ NSX/HSD!
     const constraintsList = [
@@ -3482,6 +3563,7 @@
       cameraActive = true;
       singleScanActive = false;
       livePreLock = null;
+      refreshRearLensList();
       setShutterUIState('ready');
       startLivePreLockLoop();
     } catch (err) {
@@ -3514,8 +3596,8 @@
       iconEl.textContent = '📸';
       textEl.textContent = 'QUÉT';
       statusEl.textContent = settings.autoSnapCamera
-        ? '⚡ Tự chốt v16 đang BẬT: Giữ trọn tem (cả góc trái dưới NSX/HSD) trong khung!'
-        : '👆 Bản v16: Đưa trọn tem (cả góc trái dưới NSX/HSD) vào khung → Bấm nút tròn chốt!';
+        ? '⚡ Tự chốt v17 đang BẬT: Giữ trọn tem trong khung (hoặc dùng 📚 Loạt ảnh nếu tem quá nhỏ)!'
+        : '👆 Bản v17: Bấm nút tròn chốt • Nếu khó lấy nét gần, bấm "📚 Loạt ảnh" chụp bằng Máy ảnh ĐT!';
     }
   }
 
@@ -4090,8 +4172,8 @@
         const vw = video.videoWidth;
         const vh = video.videoHeight;
 
-        // ĐÓNG BĂNG KHUNG HÌNH FULLHD 1920PX TRƯỚC KHI GIẢI MÃ MÃ VẠCH -> Sai số dịch chuyển tay bằng 0.00px tuyệt đối & giữ nguyên 100% độ nét chữ NSX/HSD!
-        captureVideoToCanvas(video, radarFrameCanvas, 1920);
+        // ĐÓNG BĂNG KHUNG HÌNH 1720PX TRƯỚC KHI GIẢI MÃ MÃ VẠCH -> Phản hồi nút bấm siêu nhạy <0.12s, sai số dịch chuyển tay 0.00px & giữ nguyên độ nét chữ NSX/HSD!
+        captureVideoToCanvas(video, radarFrameCanvas, 1720);
         const fw = radarFrameCanvas.width;
         const fh = radarFrameCanvas.height;
 
@@ -4547,6 +4629,276 @@
     ctx.drawImage(drawSource, 0, 0, cw, ch);
     if (bmp.close) bmp.close();
     return { canvas: canvas, scaleRatio: ratio };
+  }
+
+  function commitBatchPhotoScan(parsed, datesObj, fileName) {
+    const now = new Date();
+    const pdaLot = getActivePdaLotDates();
+    const nsxClean = normalizeDateVN((datesObj && datesObj.nsx) ? datesObj.nsx : pdaLot.nsx);
+    const hsdClean = normalizeDateVN((datesObj && datesObj.hsd) ? datesObj.hsd : pdaLot.hsd);
+
+    const record = {
+      id: 'scan_' + now.getTime() + '_' + Math.random().toString(36).slice(2, 7),
+      scannedAt: formatDateTimeVN(now),
+      productCode: parsed.productCode,
+      productName: parsed.productName,
+      grams: parsed.grams,
+      nsx: nsxClean,
+      hsd: hsdClean,
+      rawBarcode: parsed.rawBarcode,
+      note: '',
+      edited: false
+    };
+
+    records.push(record);
+    lastScannedCode = parsed.rawBarcode;
+    lastScannedEpoch = Date.now();
+
+    const kcs = verifyKcsIntegrity();
+    if (!kcs.ok) {
+      records.pop();
+      return { ok: false, error: kcs.error };
+    }
+
+    persistRecords();
+    enqueueOp({ type: 'add', record: toSyncRecord(record) });
+    return { ok: true, record: record };
+  }
+
+  async function processBatchImageFiles(rawFiles) {
+    if (!rawFiles || rawFiles.length === 0) return;
+    if (batchProcessingActive) {
+      showBanner('warn', '⏳ Đang xử lý dở lô ảnh hiện tại — Vui lòng đợi chạy xong rồi chọn tiếp!');
+      return;
+    }
+
+    // Lọc bỏ trường hợp bấm nhầm chọn trùng 2 lần cùng 1 tệp ảnh trong cùng 1 lần tải lên
+    const uniqueFiles = [];
+    const seenFileSig = {};
+    for (let i = 0; i < rawFiles.length; i++) {
+      const f = rawFiles[i];
+      if (!f) continue;
+      const sig = String(f.name || '') + '|' + String(f.size || 0) + '|' + String(f.lastModified || 0);
+      if (rawFiles.length > 1 && seenFileSig[sig]) continue;
+      seenFileSig[sig] = true;
+      uniqueFiles.push(f);
+    }
+    if (uniqueFiles.length === 0) return;
+
+    // Chuyển sang màn hình tiến trình Lô ảnh để người dùng theo dõi trực tiếp từng tấm!
+    if (currentMode !== 'batch') {
+      applyModeUI('batch');
+    }
+
+    batchProcessingActive = true;
+    batchCancelRequested = false;
+
+    const progBox = document.getElementById('batchProgressBox');
+    const progTxt = document.getElementById('batchProgressText');
+    const progFill = document.getElementById('batchProgressBarFill');
+    const btnCancel = document.getElementById('btnCancelBatch');
+    const elTotal = document.getElementById('batchStatTotal');
+    const elFullOk = document.getElementById('batchStatFullOk');
+    const elCodeOnly = document.getElementById('batchStatCodeOnly');
+    const elFail = document.getElementById('batchStatFail');
+    const listEl = document.getElementById('batchResultList');
+
+    if (progBox) progBox.style.display = 'block';
+    if (btnCancel) btnCancel.style.display = uniqueFiles.length > 1 ? 'inline-flex' : 'none';
+    if (listEl) listEl.innerHTML = '';
+
+    const total = uniqueFiles.length;
+    let fullOkCount = 0;
+    let codeOnlyCount = 0;
+    let failCount = 0;
+
+    const updateScoreboard = function (doneCount, statusLine) {
+      if (elTotal) elTotal.textContent = String(total);
+      if (elFullOk) elFullOk.textContent = String(fullOkCount);
+      if (elCodeOnly) elCodeOnly.textContent = String(codeOnlyCount);
+      if (elFail) elFail.textContent = String(failCount);
+      const pct = Math.min(100, Math.round((doneCount / Math.max(1, total)) * 100));
+      if (progFill) progFill.style.width = pct + '%';
+      if (progTxt && statusLine) progTxt.textContent = statusLine;
+    };
+
+    const appendRowReport = function (cls, titleHtml, subHtml, editRecordId) {
+      if (!listEl) return;
+      const item = document.createElement('div');
+      item.className = 'batch-result-item ' + cls;
+      item.innerHTML = (
+        '<div style="min-width:0;flex:1;">' +
+          '<div style="font-weight:800;color:#0f172a;word-break:break-word;">' + titleHtml + '</div>' +
+          '<div style="font-size:11.5px;color:#475569;margin-top:2px;">' + subHtml + '</div>' +
+        '</div>' +
+        (editRecordId
+          ? ('<button type="button" class="icon-btn" style="flex-shrink:0;font-weight:800;" onclick="window.AppActions.edit(\'' + escapeHtml(editRecordId) + '\')">✏️ Sửa</button>')
+          : '')
+      );
+      listEl.appendChild(item);
+    };
+
+    updateScoreboard(0, '⚡ Đang khởi động bộ đọc siêu nét cho ' + total + ' ảnh...');
+
+    try {
+      await warmUpWasmEngine();
+      await ensureNativeBarcodeDetector();
+      await warmUpOcrWorker();
+
+      for (let i = 0; i < total; i++) {
+        if (batchCancelRequested) break;
+        const file = uniqueFiles[i];
+        const shortName = String(file.name || ('Ảnh #' + (i + 1)));
+        updateScoreboard(i, '⚡ Đang đọc tấm ' + (i + 1) + ' / ' + total + ': ' + shortName);
+        await new Promise(function (r) { setTimeout(r, 15); });
+
+        let cleanCanvas = null;
+        try {
+          const cleanPack = await loadCleanCanvasFromFile(file, 2400);
+          cleanCanvas = cleanPack.canvas;
+
+          let hit = await decodePhotoInBrowserWasm(file, cleanCanvas);
+          if (!hit && navigator.onLine && location.protocol.startsWith('http') && (location.port === '8088' || location.port === '8443')) {
+            const srvCode = await decodePhotoViaLocalCppServer(file);
+            if (srvCode) hit = { code: srvCode, position: null };
+          }
+
+          if (hit && hit.code) {
+            const parsed = parseSingle13DigitScaleBarcode(hit.code);
+            if (!parsed.ok) {
+              failCount += 1;
+              appendRowReport(
+                'err',
+                '❌ #' + (i + 1) + ' (' + escapeHtml(shortName) + ')',
+                escapeHtml(parsed.error),
+                null
+              );
+            } else {
+              // Ảnh chụp từ Máy ảnh gốc ĐT rất sắc nét -> đảm bảo luôn có tọa độ mã vạch chính xác để đọc trọn cả NSX & HSD trước khi ghi dòng!
+              let posUse = hit.position || null;
+              if (!posUse) {
+                const det = await detectBarcodeCodeAndPosOnCanvas(cleanCanvas);
+                if (det && det.pos) posUse = det.pos;
+              }
+              const dates = await extractNsxHsdWithTimeout(
+                cleanCanvas,
+                posUse,
+                5200,
+                true,
+                posUse ? null : cropCenterAimFromCanvas(cleanCanvas)
+              );
+              const committed = commitBatchPhotoScan(parsed, dates, shortName);
+              if (committed.ok && committed.record) {
+                const r = committed.record;
+                const hasBothDates = Boolean(r.nsx && r.hsd);
+                if (hasBothDates) {
+                  fullOkCount += 1;
+                } else {
+                  codeOnlyCount += 1;
+                }
+                appendRowReport(
+                  hasBothDates ? 'ok' : 'warn',
+                  (hasBothDates ? '✅ ' : '⚠️ ') + '#' + (i + 1) + ': ' +
+                    escapeHtml(r.productName || ('Mã ' + r.productCode)) + ' (' + escapeHtml(r.productCode) + ') — ' +
+                    '<span style="color:#15803d;">' + formatKg(r.grams) + ' Kg</span>',
+                  'NSX: <strong>' + escapeHtml(formatLotDateDisplay(r.nsx)) + '</strong> • HSD: <strong>' +
+                    escapeHtml(formatLotDateDisplay(r.hsd)) + '</strong> · Tệp: ' + escapeHtml(shortName),
+                  r.id
+                );
+                renderAll(true);
+                if ((fullOkCount + codeOnlyCount) % 6 === 0) {
+                  flushSyncQueue(false);
+                }
+              } else {
+                failCount += 1;
+                appendRowReport('err', '❌ #' + (i + 1) + ' (' + escapeHtml(shortName) + ')', 'Lỗi KCS đối soát nội bộ', null);
+              }
+            }
+          } else if (total === 1 && records.length > 0) {
+            // Nếu chỉ tải lẻ 1 ảnh cận cảnh chụp riêng dòng NSX/HSD -> tự cập nhật vào tem vừa quét gần nhất
+            const onlyDates = await extractNsxHsdWithTimeout(cleanCanvas, null, 3000, true, cropCenterAimFromCanvas(cleanCanvas));
+            if (onlyDates.nsx || onlyDates.hsd) {
+              const latest = records[records.length - 1];
+              if (onlyDates.nsx) latest.nsx = onlyDates.nsx;
+              if (onlyDates.hsd) latest.hsd = onlyDates.hsd;
+              persistRecords();
+              enqueueOp({ type: 'update', record: toSyncRecord(latest) });
+              renderAll(true);
+              fullOkCount += 1;
+              appendRowReport(
+                'ok',
+                '✅ Đã bổ sung NSX/HSD vào tem vừa quét: ' + escapeHtml(latest.productName || latest.productCode),
+                'NSX: <strong>' + escapeHtml(formatLotDateDisplay(latest.nsx)) + '</strong> • HSD: <strong>' + escapeHtml(formatLotDateDisplay(latest.hsd)) + '</strong>',
+                latest.id
+              );
+            } else {
+              failCount += 1;
+              appendRowReport(
+                'err',
+                '❌ #' + (i + 1) + ' (' + escapeHtml(shortName) + ')',
+                'Không thấy rõ dải mã vạch 13 số trong ảnh (Không tự đoán số liệu)',
+                null
+              );
+            }
+          } else {
+            // Chế độ Lô nhiều ảnh: Nguyên tắc Fail-Closed nghiêm ngặt — ảnh nào không đọc được mã 13 số thì báo rõ ảnh đó, tuyệt đối KHÔNG tự ghép ngày sang túi khác!
+            failCount += 1;
+            appendRowReport(
+              'err',
+              '❌ #' + (i + 1) + ' (' + escapeHtml(shortName) + ') — Chưa đọc được mã vạch 13 số',
+              'Hãy chụp rõ dải sọc 13 số của túi này hoặc bấm "➕ Nhập điều chỉnh"',
+              null
+            );
+          }
+        } catch (imgErr) {
+          failCount += 1;
+          appendRowReport(
+            'err',
+            '❌ #' + (i + 1) + ' (' + escapeHtml(shortName) + ')',
+            'Không mở được tệp hình ảnh này',
+            null
+          );
+        } finally {
+          if (cleanCanvas) {
+            cleanCanvas.width = 0;
+            cleanCanvas.height = 0;
+          }
+        }
+      }
+    } finally {
+      batchProcessingActive = false;
+      if (btnCancel) btnCancel.style.display = 'none';
+      const doneTotal = fullOkCount + codeOnlyCount + failCount;
+      const summaryLine = (batchCancelRequested ? '⏹️ Đã dừng theo yêu cầu: ' : '✅ Đã xử lý xong ' + doneTotal + '/' + total + ' ảnh: ') +
+        'Ghi nhận ' + (fullOkCount + codeOnlyCount) + ' tem (' + fullOkCount + ' đủ Mã+Ngày' +
+        (codeOnlyCount > 0 ? ', ' + codeOnlyCount + ' thiếu Ngày' : '') +
+        (failCount > 0 ? ', ' + failCount + ' ảnh chưa rõ mã' : '') + ')!';
+      updateScoreboard(total, summaryLine);
+
+      renderAll(true);
+      flushSyncQueue(false);
+      setTimeout(checkPendingSwReload, 200);
+
+      if ((fullOkCount + codeOnlyCount) > 0) {
+        playBeep('ok');
+        vibrateDevice([45, 35, 65]);
+        showBanner('ok', summaryLine);
+      } else {
+        playBeep('error');
+        showBanner('error', summaryLine);
+      }
+      batchCancelRequested = false;
+    }
+  }
+
+  function handleSelectedImageFiles(fileList, forceBatchUI) {
+    if (!fileList || fileList.length === 0) return;
+    const arr = Array.prototype.slice.call(fileList);
+    if (arr.length >= 2 || forceBatchUI || currentMode === 'batch') {
+      processBatchImageFiles(arr);
+      return;
+    }
+    decodeBarcodeFromImageFile(arr[0]);
   }
 
   async function decodeBarcodeFromImageFile(file) {
@@ -5556,17 +5908,27 @@
     });
 
     const scanCard = document.getElementById('scanBoxCard');
+    const batchCard = document.getElementById('batchBoxCard');
     const camCard = document.getElementById('cameraBoxCard');
     const input = document.getElementById('barcodeInput');
     const hint = document.getElementById('scanModeHint');
 
     if (mode === 'camera') {
       scanCard.style.display = 'none';
+      if (batchCard) batchCard.style.display = 'none';
       camCard.style.display = 'block';
       startCamera1DScanner();
+    } else if (mode === 'batch') {
+      stopCamera1DScanner();
+      camCard.style.display = 'none';
+      scanCard.style.display = 'none';
+      if (batchCard) batchCard.style.display = 'block';
+      warmUpWasmEngine();
+      setTimeout(function () { warmUpOcrWorker(); }, 30);
     } else {
       stopCamera1DScanner();
       camCard.style.display = 'none';
+      if (batchCard) batchCard.style.display = 'none';
       scanCard.style.display = 'block';
 
       if (mode === 'pda') {
@@ -5809,6 +6171,42 @@
         }
       });
     }
+    const btnSwitchLens = document.getElementById('btnSwitchLens');
+    if (btnSwitchLens) {
+      btnSwitchLens.addEventListener('click', cycleRearCameraLens);
+    }
+    const btnQuickBatchJump = document.getElementById('btnQuickBatchJump');
+    if (btnQuickBatchJump) {
+      btnQuickBatchJump.addEventListener('click', function () {
+        applyModeUI('batch');
+        document.getElementById('batchGalleryInput').click();
+      });
+    }
+    const btnPickBatch = document.getElementById('btnPickBatchPhotos');
+    if (btnPickBatch) {
+      btnPickBatch.addEventListener('click', function () {
+        document.getElementById('batchGalleryInput').click();
+      });
+    }
+    const btnNativeSingle = document.getElementById('btnNativeCameraSingle');
+    if (btnNativeSingle) {
+      btnNativeSingle.addEventListener('click', function () {
+        document.getElementById('nativeCameraSnapInput').click();
+      });
+    }
+    const btnCamNativeSnap = document.getElementById('btnCamNativeSnap');
+    if (btnCamNativeSnap) {
+      btnCamNativeSnap.addEventListener('click', function () {
+        document.getElementById('nativeCameraSnapInput').click();
+      });
+    }
+    const btnCancelBatch = document.getElementById('btnCancelBatch');
+    if (btnCancelBatch) {
+      btnCancelBatch.addEventListener('click', function () {
+        batchCancelRequested = true;
+      });
+    }
+
     document.getElementById('btnPickImage').addEventListener('click', function () {
       document.getElementById('hiddenImageInput').click();
     });
@@ -5816,10 +6214,29 @@
       document.getElementById('hiddenImageInput').click();
     });
     document.getElementById('hiddenImageInput').addEventListener('change', function (e) {
-      const file = e.target.files && e.target.files[0];
-      if (file) decodeBarcodeFromImageFile(file);
+      if (e.target.files && e.target.files.length > 0) {
+        handleSelectedImageFiles(e.target.files, false);
+      }
       e.target.value = '';
     });
+    const batchInp = document.getElementById('batchGalleryInput');
+    if (batchInp) {
+      batchInp.addEventListener('change', function (e) {
+        if (e.target.files && e.target.files.length > 0) {
+          handleSelectedImageFiles(e.target.files, true);
+        }
+        e.target.value = '';
+      });
+    }
+    const nativeSnapInp = document.getElementById('nativeCameraSnapInput');
+    if (nativeSnapInp) {
+      nativeSnapInp.addEventListener('change', function (e) {
+        if (e.target.files && e.target.files.length > 0) {
+          handleSelectedImageFiles(e.target.files, currentMode === 'batch');
+        }
+        e.target.value = '';
+      });
+    }
 
     const btnModalDates = document.getElementById('btnModalReadDates');
     if (btnModalDates) {

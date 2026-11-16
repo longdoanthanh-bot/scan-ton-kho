@@ -10,7 +10,7 @@
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=16">
+  <link rel="stylesheet" href="./styles.css?v=17">
 </head>
 <body>
 
@@ -27,6 +27,7 @@
       <!-- Thanh chọn chế độ quét -->
       <div class="mode-bar">
         <button type="button" class="mode-btn active" data-mode="pda">🔫 Máy PDA</button>
+        <button type="button" class="mode-btn" data-mode="batch">📚 Loạt ảnh</button>
         <button type="button" class="mode-btn" data-mode="camera">📷 Camera ĐT</button>
         <button type="button" class="mode-btn" data-mode="manual">⌨️ Nhập mã</button>
       </div>
@@ -61,10 +62,49 @@
 
         <div class="scan-helper-bar">
           <span id="scanModeHint">🔫 Chế độ PDA: Đã ẩn bàn phím ảo & tự nhận tia quét toàn màn hình</span>
-          <div style="display:flex;gap:6px;">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" id="btnQuickBatchJump" class="icon-btn" style="background:#dcfce7;border-color:#86efac;color:#166534;font-weight:800;">📚 Tải loạt ảnh</button>
             <button type="button" id="btnQuickPhotoScan" class="icon-btn">🖼️ Quét ảnh tem</button>
             <button type="button" id="btnOpenManualAdd" class="icon-btn">➕ Nhập điều chỉnh</button>
           </div>
+        </div>
+      </div>
+
+      <!-- ==================== CHẾ ĐỘ MỚI v17: CHỤP 1 LOẠT HÌNH BẰNG MÁY ẢNH GỐC ĐT -> TẢI LÊN TỰ ĐỌC HÀNG LOẠT ==================== -->
+      <div id="batchBoxCard" class="batch-upload-card" style="display:none;">
+        <div class="batch-hero-title">
+          📸 NÉT TUYỆT ĐỐI 100%: CHỤP LOẠT HÌNH BẰNG MÁY ẢNH ĐIỆN THOẠI → TẢI LÊN 1 LẦN
+        </div>
+        <div class="batch-guide-steps">
+          <div><strong>1️⃣ Bước 1:</strong> Mở ứng dụng <strong>Máy ảnh có sẵn của điện thoại</strong> (tự động lấy nét cận cảnh cực rõ cả khay 300g lẫn bao 8 Kg) → bấm chụp liên tục <strong>10 – 200+ tấm</strong> trong kho.</div>
+          <div style="margin-top:3px;"><strong>2️⃣ Bước 2:</strong> Bấm nút xanh dưới đây → chọn hết loạt ảnh vừa chụp → Máy <strong>tự động đọc từng tấm (Mã SP + Số ký + NSX + HSD)</strong> và đẩy thẳng lên <strong>SCAN TỒN</strong>!</div>
+        </div>
+
+        <div class="batch-action-stack">
+          <button type="button" id="btnPickBatchPhotos" class="btn btn-success batch-main-btn">
+            📚 CHỌN 1 LOẠT ẢNH TEM TẢI LÊN (CHỌN NHIỀU HÌNH)
+          </button>
+          <button type="button" id="btnNativeCameraSingle" class="btn btn-primary batch-sub-btn">
+            📷 Mở Máy Ảnh Gốc ĐT chụp lẻ 1 tấm (Lấy nét tự động)
+          </button>
+        </div>
+
+        <!-- Hộp tiến trình & báo cáo kết quả từng ảnh trong lô -->
+        <div id="batchProgressBox" class="batch-progress-box" style="display:none;">
+          <div class="batch-progress-top">
+            <span id="batchProgressText">⚡ Đang đọc loạt ảnh...</span>
+            <button type="button" id="btnCancelBatch" class="icon-btn del" style="display:none;padding:4px 8px;">⏹️ Dừng</button>
+          </div>
+          <div class="batch-bar-track">
+            <div id="batchProgressBarFill" class="batch-bar-fill"></div>
+          </div>
+          <div class="batch-stats-grid">
+            <div class="batch-stat-pill">Tổng ảnh<strong id="batchStatTotal" style="color:#0f2942;">0</strong></div>
+            <div class="batch-stat-pill">Đủ Mã+Ngày<strong id="batchStatFullOk" style="color:#15803d;">0</strong></div>
+            <div class="batch-stat-pill">Thiếu Ngày<strong id="batchStatCodeOnly" style="color:#b45309;">0</strong></div>
+            <div class="batch-stat-pill">Chưa rõ mã<strong id="batchStatFail" style="color:#b91c1c;">0</strong></div>
+          </div>
+          <div id="batchResultList" class="batch-result-list"></div>
         </div>
       </div>
 
@@ -106,7 +146,7 @@
           <!-- Khung ngắm trọn cả tem (Mã vạch phía trên + NSX / HSD phía dưới) -->
           <div class="barcode-aim-overlay">
             <div class="barcode-aim-box">
-              <div class="aim-zone-top">||||| MÃ VẠCH SỌC 13 SỐ • v16 |||||</div>
+              <div class="aim-zone-top">||||| MÃ VẠCH SỌC 13 SỐ • v17 |||||</div>
               <div class="laser-line"></div>
               <div class="aim-zone-divider"></div>
               <div class="aim-zone-bottom">📅 NSX &amp; HSD (Góc trái dưới tem — đưa trọn vào khung)</div>
@@ -133,13 +173,17 @@
             <button type="button" class="btn btn-outline zoom-btn" data-zoom="1.4" style="padding:8px 9px;font-size:12px;">1.4x</button>
             <button type="button" class="btn btn-outline zoom-btn" data-zoom="2" style="padding:8px 9px;font-size:12px;">2x</button>
           </div>
+          <button type="button" id="btnSwitchLens" class="btn btn-outline" style="display:none;padding:8px 9px;font-size:12px;" title="Đổi sang ống kính góc rộng / lấy nét gần của điện thoại">🔄 Ống kính</button>
           <button type="button" id="btnToggleAutoSnap" class="btn btn-outline auto-snap-btn" style="padding:8px 9px;font-size:12px;" title="Bật để đưa tem vào khung là tự chốt ngay không cần bấm nút chụp">⚡ Tự chốt: TẮT</button>
           <button type="button" id="btnToggleTorch" class="btn btn-outline" style="padding:8px 9px;font-size:12px;">🔦 Đèn</button>
-          <button type="button" id="btnPickImage" class="btn btn-primary" style="flex:1;min-width:118px;padding:8px 10px;font-size:12px;">🖼️ Chọn ảnh</button>
+          <button type="button" id="btnCamNativeSnap" class="btn btn-outline" style="padding:8px 9px;font-size:12px;" title="Mở Máy ảnh gốc của điện thoại để chụp lấy nét tự động siêu rõ">📷 Máy ảnh gốc</button>
+          <button type="button" id="btnPickImage" class="btn btn-success" style="flex:1;min-width:128px;padding:8px 10px;font-size:12px;font-weight:800;">📚 Tải 1 / loạt ảnh</button>
         </div>
       </div>
 
-      <input type="file" id="hiddenImageInput" accept="image/*" capture="environment" style="display:none;">
+      <input type="file" id="hiddenImageInput" accept="image/*" multiple style="display:none;">
+      <input type="file" id="batchGalleryInput" accept="image/*" multiple style="display:none;">
+      <input type="file" id="nativeCameraSnapInput" accept="image/*" capture="environment" style="display:none;">
       <input type="file" id="hiddenDateOnlyImageInput" accept="image/*" capture="environment" style="display:none;">
     </div>
 
@@ -313,7 +357,7 @@
         <div class="settings-hero-top">
           <div>
             <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-            <div class="brand-sub">Bản v16 Siêu Tốc • Chuyên biệt Camera Điện Thoại • Bấm quét/chụp là ghi nhận ngay Mã + Số ký + NSX/HSD • Tồn theo SKU &amp; Date</div>
+            <div class="brand-sub">Bản v17 Siêu Tốc • Chụp 1 loạt hình bằng Máy ảnh ĐT &amp; Tải lên tự đọc hàng loạt • Tồn theo SKU &amp; Date</div>
           </div>
           <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
             <span id="syncStatusDot" class="sync-dot"></span>
@@ -515,10 +559,10 @@
   </div>
 
   <!-- Bộ giải mã mã vạch 1D + Bộ đọc chữ NSX/HSD trên tem nạp cục bộ 100% (chạy mượt cả khi mất mạng) -->
-  <script src="./vendor/zxing_wasm_reader.js?v=16"></script>
-  <script src="./vendor/ocr/tesseract.min.js?v=16"></script>
-  <script src="./catalog.js?v=16"></script>
-  <script src="./apps_script_embed.js?v=16"></script>
-  <script src="./app.js?v=16"></script>
+  <script src="./vendor/zxing_wasm_reader.js?v=17"></script>
+  <script src="./vendor/ocr/tesseract.min.js?v=17"></script>
+  <script src="./catalog.js?v=17"></script>
+  <script src="./apps_script_embed.js?v=17"></script>
+  <script src="./app.js?v=17"></script>
 </body>
 </html>

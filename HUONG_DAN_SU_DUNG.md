@@ -1,13 +1,15 @@
-# 📦 HƯỚNG DẪN SỬ DỤNG APP QUÉT TỒN KHO TEM MÃ VẠCH — BẢN v16 SIÊU TỐC (CHUYÊN BIỆT ĐIỆN THOẠI)
+# 📦 HƯỚNG DẪN SỬ DỤNG APP QUÉT TỒN KHO TEM MÃ VẠCH — BẢN v17 SIÊU TỐC (CHỤP LOẠT HÌNH & TẢI LÊN 1 LẦN)
 
-Ứng dụng quét **dải mã vạch sọc 13 số** kết hợp **tự động đọc Ngày sản xuất (NSX) & Hạn sử dụng (HSD)** trên tem cân (ví dụ: `1010040051985` → Mã sản phẩm `10040` - *Chân giò heo trước*, Khối lượng `5.198 Kg`, `NSX: 12/11/2026`, `HSD: 15/11/2026`), **khóa cứng không quét nhầm ô vuông ở góc tem**, hoạt động **100% cả khi mất mạng** và **tự động đồng bộ 2 chiều với Google Sheet `SCAN TỒN`**.
+Ứng dụng quét **dải mã vạch sọc 13 số** kết hợp **tự động đọc Ngày sản xuất (NSX) & Hạn sử dụng (HSD)** trên tem cân (ví dụ: `1010040051985` → Mã sản phẩm `10040` - *Chân giò heo trước*, Khối lượng `5.198 Kg`, `NSX: 12/11/2026`, `HSD: 15/11/2026`), hỗ trợ **chụp hàng loạt ảnh bằng Máy ảnh gốc điện thoại rồi tải lên 1 lần**, **khóa cứng không quét nhầm ô vuông ở góc tem**, hoạt động **100% cả khi mất mạng** và **tự động đồng bộ 2 chiều với Google Sheet `SCAN TỒN`**.
 
 ---
 
 ## 🌐 1. ĐƯỜNG LINK MỞ DÙNG NGAY (KHÔNG CẦN CÙNG MẠNG WI-FI, KHÔNG CẦN BẬT MÁY TÍNH)
 
 Chỉ cần điện thoại hoặc máy kiểm kho cầm tay (PDA) có 4G / 5G / bất kỳ Wi-Fi nào ở lần mở đầu tiên:
-- **Dành cho Điện thoại (iPhone / Samsung / Oppo / Xiaomi...)**:
+- **Dành cho Điện thoại — Chụp 1 loạt hình sắc nét rồi tải lên (Khuyên dùng số 1 cho cả khay nhỏ 300g & bao lớn 8 Kg)**:
+  👉 `https://longdoanthanh-bot.github.io/scan-ton-kho/#batch`
+- **Dành cho Điện thoại — Quét trực tiếp bằng khung Camera**:
   👉 `https://longdoanthanh-bot.github.io/scan-ton-kho/#camera`
 - **Dành cho Máy kiểm kho cầm tay PDA (Zebra / Urovo / Sunmi / Honeywell / iData / Newland...)**:
   👉 `https://longdoanthanh-bot.github.io/scan-ton-kho/`
@@ -18,16 +20,18 @@ Chỉ cần điện thoại hoặc máy kiểm kho cầm tay (PDA) có 4G / 5G /
 
 ---
 
-## 📸 2. CÁCH CẦM ĐIỆN THOẠI QUÉT LẤY TRỌN MÃ SP + SỐ KÝ + NSX + HSD
+## 📚 2. CÁCH NHANH & NÉT TUYỆT ĐỐI 100%: CHỤP 1 LOẠT HÌNH BẰNG MÁY ẢNH GỐC ĐIỆN THOẠI → TẢI LÊN 1 LẦN
 
-1. Đưa **trọn vẹn cả tem trắng** (gồm cả dải sọc ở trên và 2 dòng chữ `NSX / HSD` ở dưới) vào trong khung ngắm trên màn hình.
-   - Nếu đưa quá sát làm mép dưới khung cắt mất dòng ngày, thanh nhắc dưới khung sẽ báo: *`📐 Đã thấy mã ... — Hạ nhẹ khung xuống để thấy trọn dòng NSX/HSD bên dưới!`*.
-2. Bấm **nút tròn `📸 QUÉT`** (hoặc bật nút **`⚡ Tự chốt: BẬT`** để lướt tem vào khung là máy tự quét luôn không cần bấm tay):
-   - Máy **kêu bíp & chốt ngay Mã SP + Số ký trong `~0.1 giây`**.
-   - Hai dòng **`NSX` & `HSD`** được tự động đọc ngay phía sau (`~0.3–0.8 giây`) rồi **gộp chung đẩy thẳng lên bảng tính Google Sheet `SCAN TỒN`**.
-3. **Trường hợp túi thịt bị nhăn gập làm che chữ ngày lúc quét**:
-   - **Tự bù rảnh tay (không cần bấm nút)**: Chỉ cần vuốt phẳng tem và giữ trước ống kính khoảng nửa giây, máy sẽ **tự động đọc bù `NSX / HSD` điền thẳng vào dòng vừa quét** (không tạo dòng trùng rỗng) và đẩy lên Google Sheet!
-   - Hoặc bấm nút xanh **`📷 Bù ngày`** hiện nổi trên góc phải khung Camera và soi vào 2 dòng `NSX / HSD`.
+Khi kiểm kho các khay nhỏ `300g` hoặc bao thịt trong kho lạnh, trình duyệt web trên nhiều dòng điện thoại bị khóa vào 1 ống kính cố định nên không tự chuyển sang chế độ lấy nét sát gần như ứng dụng **Máy ảnh gốc của điện thoại**. Giải pháp **`📚 Loạt ảnh`** giải quyết triệt để 100%:
+
+1. **Bước 1 (Chụp liên hoàn bằng Máy ảnh gốc)**:
+   - Mở ứng dụng **Máy ảnh có sẵn trên điện thoại** (tự động lấy nét cận cảnh cực nét như mắt nhìn).
+   - Đi dọc kệ/pallet bấm chụp liên tục **10, 30, 50 hoặc 200+ tấm hình mặt tem** (kể cả khi đang ở sâu trong kho lạnh mất sạch sóng mạng).
+2. **Bước 2 (Tải cả loạt ảnh lên 1 lần)**:
+   - Mở ứng dụng ở mục **`📚 Loạt ảnh`** → bấm nút xanh lớn **`📚 CHỌN 1 LOẠT ẢNH TEM TẢI LÊN (CHỌN NHIỀU HÌNH)`**.
+   - Đánh dấu chọn toàn bộ loạt ảnh vừa chụp → bấm **Xong / Thêm**.
+   - Máy **tự động đọc lần lượt từng tấm** (lấy trọn **Mã sản phẩm + Số ký + NSX + HSD**), hiện thanh tiến trình kèm bảng kiểm đếm rõ ràng từng tấm (`Đủ Mã+Ngày` / `Thiếu Ngày` / `Chưa rõ mã`) và **tự động đẩy toàn bộ lên Google Sheet `SCAN TỒN`**!
+   - Nếu cần chụp lẻ ngay 1 tấm bằng Máy ảnh gốc, bấm nút **`📷 Mở Máy Ảnh Gốc ĐT chụp lẻ 1 tấm`**.
 
 ---
 
