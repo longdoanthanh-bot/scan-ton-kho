@@ -1,7 +1,8 @@
 /**
  * ============================================================================
- * BỘ KẾT NỐI TỰ ĐỘNG 2 CHIỀU APP QUÉT TỒN KHO <-> GOOGLE SHEET (v9)
- * Hỗ trợ tự động đọc NSX & HSD + Đồng bộ tức thì khi xóa/sửa dòng trực tiếp trên Sheet
+ * BỘ KẾT NỐI TỰ ĐỘNG 2 CHIỀU APP QUÉT TỒN KHO <-> GOOGLE SHEET (v10)
+ * Hỗ trợ tự động đọc NSX & HSD + Báo cáo Tổng hợp Tồn đa chiều (Theo SKU × Date, Gộp Theo SKU, Gộp Theo Date)
+ * + Đồng bộ tức thì khi xóa/sửa dòng trực tiếp trên Sheet
  * ============================================================================
  * - Google Sheet gắn cố định: https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0
  * - Đường truyền Web App (/exec): https://script.google.com/macros/s/AKfycbxlF9UorbWyYzxFA4avEIkloBab44VZzqznaxTXSSTAZtb13QRp5GQoHb_KGCAnAayg/exec
@@ -13,6 +14,7 @@ const SHEET_CHI_TIET = 'Chi_Tiet_Scan';
 const SHEET_TONG_HOP = 'Tong_Hop_Ton';
 const SHEET_DANH_MUC = 'Danh_Muc_SP';
 const APP_ONLINE_URL = 'https://longdoanthanh-bot.github.io/scan-ton-kho/';
+const SCRIPT_VERSION = 'v10_sku_date_summary';
 
 function getTargetSpreadsheet() {
   try {
@@ -26,7 +28,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('📦 Quản Lý Quét Tồn')
     .addItem('1. Khởi tạo / Chuẩn hóa các trang bảng tính', 'initAllSheets')
-    .addItem('2. Tính toán & Làm mới lại bảng Tổng hợp', 'rebuildTotalsAndSummary')
+    .addItem('2. Tính toán & Làm mới lại bảng Tổng hợp (Theo SKU & Date)', 'rebuildTotalsAndSummary')
     .addToUi();
 }
 
@@ -67,6 +69,10 @@ function sheetNeedsSelfHeal(ss, parsedRecords) {
     if (sumCountVal === '' || Number(sumCountVal) !== parsedRecords.length) {
       return true;
     }
+    const sumBanner = String(shSum.getRange('A1').getValue() || '');
+    if (sumBanner.indexOf('THEO SKU & THEO DATE') === -1) {
+      return true;
+    }
     return false;
   } catch (e) {
     return false;
@@ -83,7 +89,7 @@ function doGet(e) {
       const recs = readAllScanRecords(ss);
       return jsonResponse({
         ok: true,
-        version: 'v9_live_sync',
+        version: SCRIPT_VERSION,
         sheetName: ss.getName(),
         sheetUrl: ss.getUrl(),
         totalRows: recs.length,
@@ -107,7 +113,7 @@ function doGet(e) {
       const includeCat = !(e && e.parameter && String(e.parameter.lite || '') === '1');
       return jsonResponse({
         ok: true,
-        version: 'v9_live_sync',
+        version: SCRIPT_VERSION,
         sheetName: ss.getName(),
         sheetUrl: ss.getUrl(),
         records: recs,
@@ -119,8 +125,8 @@ function doGet(e) {
     if (action === 'json_status') {
       return jsonResponse({
         ok: true,
-        version: 'v9_live_sync',
-        message: 'Kết nối 2 chiều Google Sheet Quét Tồn Kho (NSX & HSD) đang hoạt động tốt!',
+        version: SCRIPT_VERSION,
+        message: 'Kết nối 2 chiều Google Sheet Quét Tồn Kho (Theo SKU & Theo Date NSX/HSD) đang hoạt động tốt!',
         sheetName: ss.getName(),
         sheetUrl: ss.getUrl()
       });
@@ -134,7 +140,7 @@ function doGet(e) {
       '.btn{display:block;padding:12px 16px;margin-top:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#fff;background:#0284c7}',
       '.btn.g{background:#15803d}</style></head><body><div class="box">',
       '<h2 style="margin:0 0 8px;color:#0f2942">✅ Cổng Đồng Bộ 2 Chiều Google Sheet Đang Hoạt Động</h2>',
-      '<p style="font-size:14px;color:#475569">Đã kết nối trực tiếp bảng tính <strong>' + ss.getName() + '</strong> (Hỗ trợ tự động lưu Mã SP, Số Ký, NSX, HSD & đồng bộ ngược khi xóa/sửa dòng trên Sheet).</p>',
+      '<p style="font-size:14px;color:#475569">Đã kết nối trực tiếp bảng tính <strong>' + ss.getName() + '</strong> (Tự động lưu Mã SKU, Số Ký, NSX, HSD, Tổng hợp theo SKU & Date và đồng bộ ngược khi xóa/sửa dòng trên Sheet).</p>',
       '<a class="btn g" href="' + APP_ONLINE_URL + '" target="_top">📷 Mở Ứng Dụng Quét Tồn Kho</a>',
       '<a class="btn" href="' + ss.getUrl() + '" target="_blank">📊 Mở Bảng Tính Google Sheet</a>',
       '</div></body></html>'
@@ -159,7 +165,7 @@ function doPost(e) {
       const recs = readAllScanRecords(ss);
       return jsonResponse({
         ok: true,
-        version: 'v9_live_sync',
+        version: SCRIPT_VERSION,
         sheetName: ss.getName(),
         sheetUrl: ss.getUrl(),
         totalRows: recs.length
@@ -181,7 +187,7 @@ function doPost(e) {
       const finalRecords = readAllScanRecords(ss);
       return jsonResponse({
         ok: true,
-        version: 'v9_live_sync',
+        version: SCRIPT_VERSION,
         summary: summary,
         records: finalRecords,
         sheetUrl: ss.getUrl()
@@ -198,7 +204,7 @@ function doPost(e) {
       const finalRecords = readAllScanRecords(ss);
       return jsonResponse({
         ok: true,
-        version: 'v9_live_sync',
+        version: SCRIPT_VERSION,
         summary: summary,
         records: finalRecords,
         sheetUrl: ss.getUrl()
@@ -330,6 +336,73 @@ function cleanDateField(v) {
   const s = String(v || '').trim();
   if (!s || s === '—' || s === '-' || s === 'null' || s === 'undefined') return '';
   return s;
+}
+
+function parseDateVNToUtc(rawStr) {
+  const s = cleanDateField(rawStr);
+  if (!s) return { ok: false, utc: Number.MAX_SAFE_INTEGER, display: '—' };
+  const m = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/.exec(s);
+  if (!m) return { ok: false, utc: Number.MAX_SAFE_INTEGER - 1, display: s };
+  const d = parseInt(m[1], 10);
+  const mo = parseInt(m[2], 10);
+  const y = parseInt(m[3], 10);
+  if (y < 2020 || y > 2045 || mo < 1 || mo > 12 || d < 1 || d > 31) {
+    return { ok: false, utc: Number.MAX_SAFE_INTEGER - 1, display: s };
+  }
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== (mo - 1) || dt.getUTCDate() !== d) {
+    return { ok: false, utc: Number.MAX_SAFE_INTEGER - 1, display: s };
+  }
+  const pad2 = function (n) { return n < 10 ? ('0' + n) : String(n); };
+  return {
+    ok: true,
+    utc: dt.getTime(),
+    display: pad2(d) + '/' + pad2(mo) + '/' + y
+  };
+}
+
+function getTodayUtcVN() {
+  const parts = Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'yyyy-MM-dd').split('-');
+  return Date.UTC(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+}
+
+function evaluateShelfLifeStatus(hsdStr, todayUtc) {
+  const p = parseDateVNToUtc(hsdStr);
+  // Nguyên tắc Fail-Closed: Thiếu ngày thì trả về '—', tuyệt đối không tự đoán hạn dùng!
+  if (!p.ok) {
+    return { text: '—', level: 'unknown', bg: '#F8FAFC', fg: '#64748B' };
+  }
+  const diffDays = Math.round((p.utc - todayUtc) / 86400000);
+  if (diffDays < 0) {
+    return {
+      text: 'Quá hạn ' + Math.abs(diffDays) + ' ngày',
+      level: 'expired',
+      bg: '#FEE2E2',
+      fg: '#991B1B'
+    };
+  }
+  if (diffDays === 0) {
+    return {
+      text: 'Hết hạn hôm nay',
+      level: 'today',
+      bg: '#FEF3C7',
+      fg: '#92400E'
+    };
+  }
+  if (diffDays <= 2) {
+    return {
+      text: 'Còn ' + diffDays + ' ngày (Cận date)',
+      level: 'near',
+      bg: '#FEF3C7',
+      fg: '#92400E'
+    };
+  }
+  return {
+    text: 'Còn ' + diffDays + ' ngày',
+    level: 'ok',
+    bg: '#DCFCE7',
+    fg: '#166534'
+  };
 }
 
 function applyOperations(ss, ops) {
@@ -501,133 +574,473 @@ function rebuildTotalsAndSummaryInternal(ss) {
   const records = readAllScanRecords(ss);
   writeAllScanRecords(ss, records);
 
-  const byProduct = {};
+  const todayUtc = getTodayUtcVN();
+  const bySku = {};
+  const byDate = {};
+  const bySkuDate = {};
+  const knownDateKeyMap = {};
   let totalGrams = 0;
 
   for (let i = 0; i < records.length; i++) {
     const r = records[i];
-    const key = r.productCode || 'CHUA_RO';
-    if (!byProduct[key]) {
-      byProduct[key] = {
-        code: r.productCode || '—',
-        name: r.productName || '—',
+    const codeKey = String(r.productCode || '').trim() || 'CHUA_RO';
+    const dispCode = String(r.productCode || '').trim() || '—';
+    const dispName = (r.productName && r.productName !== '—') ? String(r.productName).trim() : '—';
+    const pNsx = parseDateVNToUtc(r.nsx);
+    const pHsd = parseDateVNToUtc(r.hsd);
+    const nsxDisp = pNsx.ok ? pNsx.display : (cleanDateField(r.nsx) || '—');
+    const hsdDisp = pHsd.ok ? pHsd.display : (cleanDateField(r.hsd) || '—');
+    const hasAnyDate = Boolean(nsxDisp !== '—' || hsdDisp !== '—');
+    const datePairKey = hsdDisp + '|' + nsxDisp;
+    const skuDateKey = codeKey + '|' + datePairKey;
+    const g = Math.round(Number(r.grams || 0));
+
+    totalGrams += g;
+    if (hasAnyDate) {
+      knownDateKeyMap[datePairKey] = true;
+    }
+
+    // 1. Nhóm theo SKU × Date (NSX / HSD)
+    if (!bySkuDate[skuDateKey]) {
+      bySkuDate[skuDateKey] = {
+        code: dispCode,
+        name: dispName,
+        nsx: nsxDisp,
+        hsd: hsdDisp,
+        nsxUtc: pNsx.utc,
+        hsdUtc: pHsd.utc,
+        hasDate: hasAnyDate,
         count: 0,
-        grams: 0,
-        lots: {}
+        grams: 0
       };
     }
-    if (byProduct[key].name === '—' && r.productName && r.productName !== '—') {
-      byProduct[key].name = r.productName;
+    if (bySkuDate[skuDateKey].name === '—' && dispName !== '—') {
+      bySkuDate[skuDateKey].name = dispName;
     }
-    byProduct[key].count += 1;
-    byProduct[key].grams += r.grams;
-    if (r.nsx || r.hsd) {
-      const lotLabel = (r.nsx || '—') + ' → ' + (r.hsd || '—');
-      byProduct[key].lots[lotLabel] = true;
+    bySkuDate[skuDateKey].count += 1;
+    bySkuDate[skuDateKey].grams += g;
+
+    // 2. Nhóm gộp theo SKU (Mã sản phẩm)
+    if (!bySku[codeKey]) {
+      bySku[codeKey] = {
+        code: dispCode,
+        name: dispName,
+        count: 0,
+        grams: 0,
+        missingDateCount: 0,
+        dateBreakdown: {}
+      };
     }
-    totalGrams += r.grams;
+    if (bySku[codeKey].name === '—' && dispName !== '—') {
+      bySku[codeKey].name = dispName;
+    }
+    bySku[codeKey].count += 1;
+    bySku[codeKey].grams += g;
+    if (!hasAnyDate) {
+      bySku[codeKey].missingDateCount += 1;
+    }
+    if (!bySku[codeKey].dateBreakdown[datePairKey]) {
+      bySku[codeKey].dateBreakdown[datePairKey] = {
+        nsx: nsxDisp,
+        hsd: hsdDisp,
+        hsdUtc: pHsd.utc,
+        nsxUtc: pNsx.utc,
+        hasDate: hasAnyDate,
+        count: 0,
+        grams: 0
+      };
+    }
+    bySku[codeKey].dateBreakdown[datePairKey].count += 1;
+    bySku[codeKey].dateBreakdown[datePairKey].grams += g;
+
+    // 3. Nhóm gộp theo Date (HSD / NSX)
+    if (!byDate[datePairKey]) {
+      byDate[datePairKey] = {
+        nsx: nsxDisp,
+        hsd: hsdDisp,
+        nsxUtc: pNsx.utc,
+        hsdUtc: pHsd.utc,
+        hasDate: hasAnyDate,
+        count: 0,
+        grams: 0,
+        skuBreakdown: {}
+      };
+    }
+    byDate[datePairKey].count += 1;
+    byDate[datePairKey].grams += g;
+    if (!byDate[datePairKey].skuBreakdown[codeKey]) {
+      byDate[datePairKey].skuBreakdown[codeKey] = {
+        code: dispCode,
+        name: dispName,
+        count: 0,
+        grams: 0
+      };
+    }
+    if (byDate[datePairKey].skuBreakdown[codeKey].name === '—' && dispName !== '—') {
+      byDate[datePairKey].skuBreakdown[codeKey].name = dispName;
+    }
+    byDate[datePairKey].skuBreakdown[codeKey].count += 1;
+    byDate[datePairKey].skuBreakdown[codeKey].grams += g;
   }
 
-  const productList = Object.keys(byProduct).map(function (k) { return byProduct[k]; });
-  productList.sort(function (a, b) { return b.grams - a.grams; });
+  // Sắp xếp Bảng 1 (Theo SKU × Date): theo Mã SKU tăng dần, cùng SKU ưu tiên HSD gần nhất lên đầu (FEFO), chưa rõ date xếp cuối
+  const skuDateList = Object.keys(bySkuDate).map(function (k) { return bySkuDate[k]; });
+  skuDateList.sort(function (a, b) {
+    if (a.code !== b.code) return String(a.code).localeCompare(String(b.code));
+    if (a.hsdUtc !== b.hsdUtc) return a.hsdUtc - b.hsdUtc;
+    if (a.nsxUtc !== b.nsxUtc) return a.nsxUtc - b.nsxUtc;
+    return b.grams - a.grams;
+  });
+
+  // Sắp xếp Bảng 2 (Gộp Theo SKU): theo Tổng số ký giảm dần
+  const skuList = Object.keys(bySku).map(function (k) { return bySku[k]; });
+  skuList.sort(function (a, b) {
+    if (b.grams !== a.grams) return b.grams - a.grams;
+    return String(a.code).localeCompare(String(b.code));
+  });
+
+  // Sắp xếp Bảng 3 (Gộp Theo Date): ưu tiên HSD hết hạn sớm lên đầu (FEFO), dòng chưa rõ NSX/HSD xếp cuối
+  const dateList = Object.keys(byDate).map(function (k) { return byDate[k]; });
+  dateList.sort(function (a, b) {
+    if (a.hasDate !== b.hasDate) return a.hasDate ? -1 : 1;
+    if (a.hsdUtc !== b.hsdUtc) return a.hsdUtc - b.hsdUtc;
+    if (a.nsxUtc !== b.nsxUtc) return a.nsxUtc - b.nsxUtc;
+    return b.grams - a.grams;
+  });
 
   const totalScans = records.length;
-  const totalProducts = productList.length;
+  const totalProducts = skuList.length;
+  const knownDateLotsCount = Object.keys(knownDateKeyMap).length;
   const totalKg = totalGrams / 1000;
+
+  // Cầu dao tự ngắt KCS kiểm tra chéo tổng số tem & tổng số ký giữa cả 3 chiều báo cáo
+  let chk1Cnt = 0, chk1G = 0, chk2Cnt = 0, chk2G = 0, chk3Cnt = 0, chk3G = 0;
+  for (let i = 0; i < skuDateList.length; i++) { chk1Cnt += skuDateList[i].count; chk1G += skuDateList[i].grams; }
+  for (let i = 0; i < skuList.length; i++) { chk2Cnt += skuList[i].count; chk2G += skuList[i].grams; }
+  for (let i = 0; i < dateList.length; i++) { chk3Cnt += dateList[i].count; chk3G += dateList[i].grams; }
+  if (chk1Cnt !== totalScans || chk2Cnt !== totalScans || chk3Cnt !== totalScans ||
+      chk1G !== totalGrams || chk2G !== totalGrams || chk3G !== totalGrams) {
+    throw new Error('KCS FAIL: Lệch số liệu đối chiếu chéo giữa 3 chiều tổng hợp SKU × Date!');
+  }
 
   const shSum = ss.getSheetByName(SHEET_TONG_HOP);
   shSum.clear();
 
-  shSum.getRange('A1:H1').merge()
-    .setValue('BÁO CÁO TỔNG HỢP KIỂM TỒN KHO QUÉT TEM MÃ VẠCH')
+  // Tiêu đề & Thời gian cập nhật (Cột A..I)
+  shSum.getRange('A1:I1').merge()
+    .setValue('BÁO CÁO TỔNG HỢP TỒN KHO QUÉT TEM MÃ VẠCH (THEO SKU & THEO DATE)')
     .setBackground('#1B365D')
     .setFontColor('#FFFFFF')
     .setFontSize(13)
     .setFontWeight('bold')
-    .setHorizontalAlignment('center');
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle');
   shSum.setRowHeight(1, 38);
 
-  shSum.getRange('A2:H2').merge()
-    .setValue('Cập nhật mới nhất: ' + formatDateTimeVN(new Date()))
+  shSum.getRange('A2:I2').merge()
+    .setValue('Cập nhật mới nhất: ' + formatDateTimeVN(new Date()) + ' • Tự động đối soát 3 chiều: Theo SKU × Date | Gộp Theo SKU | Gộp Theo Date')
     .setBackground('#EEF2F6')
     .setFontColor('#334155')
     .setHorizontalAlignment('center');
 
+  // 4 Thẻ chỉ số tổng quan (Giữ nguyên ô A5 = Tổng số tem để tự động kiểm tra đồng bộ!)
   shSum.getRange('A4:B4').merge().setValue('TỔNG SỐ TEM ĐÃ SCAN').setBackground('#E0F2FE').setFontWeight('bold').setHorizontalAlignment('center');
-  shSum.getRange('C4:E4').merge().setValue('TỔNG SỐ SẢN PHẨM ĐÃ SCAN').setBackground('#FEF3C7').setFontWeight('bold').setHorizontalAlignment('center');
-  shSum.getRange('F4:H4').merge().setValue('TỔNG SỐ KÝ ĐÃ SCAN (Kg)').setBackground('#DCFCE7').setFontWeight('bold').setHorizontalAlignment('center');
+  shSum.getRange('C4:D4').merge().setValue('TỔNG SỐ MÃ SKU').setBackground('#FEF3C7').setFontWeight('bold').setHorizontalAlignment('center');
+  shSum.getRange('E4:F4').merge().setValue('SỐ LÔ DATE ĐÃ GHI NHẬN').setBackground('#EDE9FE').setFontWeight('bold').setHorizontalAlignment('center');
+  shSum.getRange('G4:I4').merge().setValue('TỔNG SỐ KÝ ĐÃ SCAN (Kg)').setBackground('#DCFCE7').setFontWeight('bold').setHorizontalAlignment('center');
 
   shSum.getRange('A5:B5').merge().setValue(totalScans).setNumberFormat('#,##0').setFontSize(16).setFontWeight('bold').setHorizontalAlignment('center');
-  shSum.getRange('C5:E5').merge().setValue(totalProducts).setNumberFormat('#,##0').setFontSize(16).setFontWeight('bold').setHorizontalAlignment('center');
-  shSum.getRange('F5:H5').merge().setValue(totalKg).setNumberFormat('#,##0.000').setFontSize(16).setFontWeight('bold').setHorizontalAlignment('center');
+  shSum.getRange('C5:D5').merge().setValue(totalProducts).setNumberFormat('#,##0').setFontSize(16).setFontWeight('bold').setHorizontalAlignment('center');
+  shSum.getRange('E5:F5').merge().setValue(knownDateLotsCount).setNumberFormat('#,##0').setFontSize(16).setFontWeight('bold').setHorizontalAlignment('center');
+  shSum.getRange('G5:I5').merge().setValue(totalKg).setNumberFormat('#,##0.000').setFontSize(16).setFontWeight('bold').setHorizontalAlignment('center');
   shSum.setRowHeight(5, 36);
 
-  const sumHeaders = [[
-    'STT',
-    'Mã sản phẩm',
-    'Tên sản phẩm',
-    'Tổng số tem đã scan',
-    'Tổng số ký đã scan (Kg)',
-    'Bình quân (Kg/tem)',
-    'Tỷ trọng khối lượng (%)',
-    'Lô NSX → HSD'
-  ]];
-  shSum.getRange(7, 1, 1, 8).setValues(sumHeaders)
-    .setBackground('#1B365D')
-    .setFontColor('#FFFFFF')
-    .setFontWeight('bold')
-    .setHorizontalAlignment('center');
-  shSum.setRowHeight(7, 32);
+  let curRow = 7;
 
-  if (productList.length > 0) {
-    const sumRows = [];
-    for (let i = 0; i < productList.length; i++) {
-      const p = productList[i];
+  // =========================================================================
+  // BẢNG 1: TỔNG HỢP TỒN CHI TIẾT THEO MÃ SKU × THEO DATE (NSX / HSD)
+  // =========================================================================
+  shSum.getRange(curRow, 1, 1, 9).merge()
+    .setValue('I. TỔNG HỢP TỒN CHI TIẾT THEO MÃ SKU × THEO DATE (NSX / HSD)')
+    .setBackground('#0F2942')
+    .setFontColor('#FFFFFF')
+    .setFontSize(11)
+    .setFontWeight('bold')
+    .setVerticalAlignment('middle');
+  shSum.setRowHeight(curRow, 30);
+  curRow += 1;
+
+  shSum.getRange(curRow, 1, 1, 9).setValues([[
+    'STT',
+    'Mã SKU',
+    'Tên sản phẩm',
+    'NSX',
+    'HSD (Date)',
+    'Tình trạng hạn dùng',
+    'Tổng số tem',
+    'Tổng số ký (Kg)',
+    'Tỷ trọng KL (%)'
+  ]]).setBackground('#1B365D').setFontColor('#FFFFFF').setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
+  shSum.setRowHeight(curRow, 30);
+  curRow += 1;
+
+  if (skuDateList.length > 0) {
+    const rows1 = [];
+    const statusBgs1 = [];
+    const statusFgs1 = [];
+    for (let i = 0; i < skuDateList.length; i++) {
+      const item = skuDateList[i];
+      const kg = item.grams / 1000;
+      const share = totalGrams > 0 ? (item.grams / totalGrams) : 0;
+      const st = evaluateShelfLifeStatus(item.hsd, todayUtc);
+      rows1.push([
+        i + 1,
+        String(item.code),
+        String(item.name),
+        String(item.nsx),
+        String(item.hsd),
+        st.text,
+        item.count,
+        kg,
+        share
+      ]);
+      statusBgs1.push([st.bg]);
+      statusFgs1.push([st.fg]);
+    }
+    shSum.getRange(curRow, 2, rows1.length, 1).setNumberFormat('@');
+    shSum.getRange(curRow, 4, rows1.length, 3).setNumberFormat('@');
+    shSum.getRange(curRow, 1, rows1.length, 9).setValues(rows1).setVerticalAlignment('middle');
+    shSum.getRange(curRow, 1, rows1.length, 2).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 4, rows1.length, 4).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 6, rows1.length, 1).setBackgrounds(statusBgs1).setFontColors(statusFgs1).setFontWeight('bold');
+    shSum.getRange(curRow, 7, rows1.length, 1).setNumberFormat('#,##0');
+    shSum.getRange(curRow, 8, rows1.length, 1).setNumberFormat('#,##0.000');
+    shSum.getRange(curRow, 9, rows1.length, 1).setNumberFormat('0.0%');
+    curRow += rows1.length;
+
+    shSum.getRange(curRow, 1, 1, 9).setValues([[
+      '',
+      'TỔNG CỘNG',
+      skuDateList.length + ' dòng (SKU × Date)',
+      '—',
+      '—',
+      '—',
+      totalScans,
+      totalKg,
+      totalGrams > 0 ? 1 : 0
+    ]]).setBackground('#E2E8F0').setFontWeight('bold').setVerticalAlignment('middle');
+    shSum.getRange(curRow, 2, 1, 1).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 4, 1, 4).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 7, 1, 1).setNumberFormat('#,##0');
+    shSum.getRange(curRow, 8, 1, 1).setNumberFormat('#,##0.000');
+    shSum.getRange(curRow, 9, 1, 1).setNumberFormat('0.0%');
+    curRow += 2;
+  } else {
+    shSum.getRange(curRow, 1, 1, 9).merge().setValue('Chưa có tem nào được quét trong phiên hiện tại.').setHorizontalAlignment('center').setFontColor('#64748B');
+    curRow += 2;
+  }
+
+  // =========================================================================
+  // BẢNG 2: TỔNG HỢP TỒN GỘP THEO MÃ SẢN PHẨM (THEO SKU)
+  // =========================================================================
+  shSum.getRange(curRow, 1, 1, 9).merge()
+    .setValue('II. TỔNG HỢP TỒN GỘP THEO MÃ SẢN PHẨM (THEO SKU)')
+    .setBackground('#1E3A8A')
+    .setFontColor('#FFFFFF')
+    .setFontSize(11)
+    .setFontWeight('bold')
+    .setVerticalAlignment('middle');
+  shSum.setRowHeight(curRow, 30);
+  curRow += 1;
+
+  shSum.getRange(curRow, 1, 1, 9).setValues([[
+    'STT',
+    'Mã SKU',
+    'Tên sản phẩm',
+    'Số lô Date',
+    'Tổng số tem',
+    'Tổng số ký (Kg)',
+    'Bình quân (Kg/tem)',
+    'Tỷ trọng KL (%)',
+    'Chi tiết tồn theo từng Date (HSD / NSX)'
+  ]]).setBackground('#1B365D').setFontColor('#FFFFFF').setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
+  shSum.setRowHeight(curRow, 30);
+  curRow += 1;
+
+  if (skuList.length > 0) {
+    const rows2 = [];
+    for (let i = 0; i < skuList.length; i++) {
+      const p = skuList[i];
       const kg = p.grams / 1000;
       const avgKg = p.count > 0 ? (kg / p.count) : 0;
       const share = totalGrams > 0 ? (p.grams / totalGrams) : 0;
-      const lotKeys = Object.keys(p.lots);
-      sumRows.push([
+      const dItems = Object.keys(p.dateBreakdown).map(function (k) { return p.dateBreakdown[k]; });
+      dItems.sort(function (a, b) {
+        if (a.hasDate !== b.hasDate) return a.hasDate ? -1 : 1;
+        if (a.hsdUtc !== b.hsdUtc) return a.hsdUtc - b.hsdUtc;
+        return a.nsxUtc - b.nsxUtc;
+      });
+      let knownLotsForSku = 0;
+      const detailParts = [];
+      for (let dIdx = 0; dIdx < dItems.length; dIdx++) {
+        const di = dItems[dIdx];
+        const diKg = (di.grams / 1000).toFixed(3);
+        if (di.hasDate) {
+          knownLotsForSku += 1;
+          detailParts.push('HSD ' + di.hsd + ' (NSX ' + di.nsx + '): ' + di.count + ' tem • ' + diKg + ' Kg');
+        } else {
+          detailParts.push('Chưa rõ date (—): ' + di.count + ' tem • ' + diKg + ' Kg');
+        }
+      }
+      const lotCountDisp = knownLotsForSku > 0
+        ? (knownLotsForSku + ' lô date' + (p.missingDateCount > 0 ? ' (+' + p.missingDateCount + ' tem —)' : ''))
+        : '—';
+
+      rows2.push([
         i + 1,
         String(p.code),
         String(p.name),
+        lotCountDisp,
         p.count,
         kg,
         avgKg,
         share,
-        lotKeys.length > 0 ? lotKeys.join('; ') : '—'
+        detailParts.join('; ')
       ]);
     }
-    shSum.getRange(8, 2, sumRows.length, 1).setNumberFormat('@');
-    shSum.getRange(8, 8, sumRows.length, 1).setNumberFormat('@');
-    shSum.getRange(8, 1, sumRows.length, 8).setValues(sumRows);
-    shSum.getRange(8, 1, sumRows.length, 2).setHorizontalAlignment('center');
-    shSum.getRange(8, 4, sumRows.length, 1).setNumberFormat('#,##0').setHorizontalAlignment('center');
-    shSum.getRange(8, 5, sumRows.length, 2).setNumberFormat('#,##0.000');
-    shSum.getRange(8, 7, sumRows.length, 1).setNumberFormat('0.0%');
+    shSum.getRange(curRow, 2, rows2.length, 1).setNumberFormat('@');
+    shSum.getRange(curRow, 4, rows2.length, 1).setNumberFormat('@');
+    shSum.getRange(curRow, 9, rows2.length, 1).setNumberFormat('@').setWrap(true);
+    shSum.getRange(curRow, 1, rows2.length, 9).setValues(rows2).setVerticalAlignment('middle');
+    shSum.getRange(curRow, 1, rows2.length, 2).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 4, rows2.length, 2).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 5, rows2.length, 1).setNumberFormat('#,##0');
+    shSum.getRange(curRow, 6, rows2.length, 2).setNumberFormat('#,##0.000');
+    shSum.getRange(curRow, 8, rows2.length, 1).setNumberFormat('0.0%');
+    curRow += rows2.length;
 
-    const totalRowIdx = 8 + sumRows.length;
-    shSum.getRange(totalRowIdx, 1, 1, 8).setValues([[
+    shSum.getRange(curRow, 1, 1, 9).setValues([[
       '',
       'TỔNG CỘNG',
-      totalProducts + ' mã sản phẩm',
+      totalProducts + ' mã SKU',
+      knownDateLotsCount > 0 ? (knownDateLotsCount + ' lô date') : '—',
       totalScans,
       totalKg,
       totalScans > 0 ? (totalKg / totalScans) : 0,
       totalGrams > 0 ? 1 : 0,
       ''
-    ]]).setBackground('#E2E8F0').setFontWeight('bold');
-    shSum.getRange(totalRowIdx, 4, 1, 1).setNumberFormat('#,##0').setHorizontalAlignment('center');
-    shSum.getRange(totalRowIdx, 5, 1, 2).setNumberFormat('#,##0.000');
-    shSum.getRange(totalRowIdx, 7, 1, 1).setNumberFormat('0.0%');
+    ]]).setBackground('#E2E8F0').setFontWeight('bold').setVerticalAlignment('middle');
+    shSum.getRange(curRow, 2, 1, 1).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 4, 1, 2).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 5, 1, 1).setNumberFormat('#,##0');
+    shSum.getRange(curRow, 6, 1, 2).setNumberFormat('#,##0.000');
+    shSum.getRange(curRow, 8, 1, 1).setNumberFormat('0.0%');
+    curRow += 2;
+  } else {
+    shSum.getRange(curRow, 1, 1, 9).merge().setValue('Chưa có dữ liệu tổng hợp theo SKU.').setHorizontalAlignment('center').setFontColor('#64748B');
+    curRow += 2;
   }
 
-  const sumWidths = [55, 115, 250, 145, 165, 145, 155, 220];
+  // =========================================================================
+  // BẢNG 3: TỔNG HỢP TỒN GỘP THEO DATE (HSD / NSX — ƯU TIÊN XUẤT TRƯỚC)
+  // =========================================================================
+  shSum.getRange(curRow, 1, 1, 9).merge()
+    .setValue('III. TỔNG HỢP TỒN GỘP THEO DATE (HSD / NSX — SẮP XẾP HẠN DÙNG SỚM LÊN ĐẦU)')
+    .setBackground('#065F46')
+    .setFontColor('#FFFFFF')
+    .setFontSize(11)
+    .setFontWeight('bold')
+    .setVerticalAlignment('middle');
+  shSum.setRowHeight(curRow, 30);
+  curRow += 1;
+
+  shSum.getRange(curRow, 1, 1, 9).setValues([[
+    'STT',
+    'HSD (Date)',
+    'NSX',
+    'Tình trạng hạn dùng',
+    'Số mã SKU',
+    'Tổng số tem',
+    'Tổng số ký (Kg)',
+    'Tỷ trọng KL (%)',
+    'Chi tiết các SKU thuộc Date này'
+  ]]).setBackground('#1B365D').setFontColor('#FFFFFF').setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
+  shSum.setRowHeight(curRow, 30);
+  curRow += 1;
+
+  if (dateList.length > 0) {
+    const rows3 = [];
+    const statusBgs3 = [];
+    const statusFgs3 = [];
+    for (let i = 0; i < dateList.length; i++) {
+      const dg = dateList[i];
+      const kg = dg.grams / 1000;
+      const share = totalGrams > 0 ? (dg.grams / totalGrams) : 0;
+      const st = dg.hasDate
+        ? evaluateShelfLifeStatus(dg.hsd, todayUtc)
+        : { text: '— (Chưa ghi nhận NSX/HSD)', bg: '#F8FAFC', fg: '#64748B' };
+      const sItems = Object.keys(dg.skuBreakdown).map(function (k) { return dg.skuBreakdown[k]; });
+      sItems.sort(function (a, b) { return b.grams - a.grams; });
+      const skuParts = [];
+      for (let sIdx = 0; sIdx < sItems.length; sIdx++) {
+        const si = sItems[sIdx];
+        skuParts.push(si.code + ' - ' + si.name + ' (' + si.count + ' tem • ' + (si.grams / 1000).toFixed(3) + ' Kg)');
+      }
+      rows3.push([
+        i + 1,
+        String(dg.hsd),
+        String(dg.nsx),
+        st.text,
+        sItems.length,
+        dg.count,
+        kg,
+        share,
+        skuParts.join('; ')
+      ]);
+      statusBgs3.push([st.bg]);
+      statusFgs3.push([st.fg]);
+    }
+    shSum.getRange(curRow, 2, rows3.length, 3).setNumberFormat('@');
+    shSum.getRange(curRow, 9, rows3.length, 1).setNumberFormat('@').setWrap(true);
+    shSum.getRange(curRow, 1, rows3.length, 9).setValues(rows3).setVerticalAlignment('middle');
+    shSum.getRange(curRow, 1, rows3.length, 6).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 2, rows3.length, 1).setFontWeight('bold');
+    shSum.getRange(curRow, 4, rows3.length, 1).setBackgrounds(statusBgs3).setFontColors(statusFgs3).setFontWeight('bold');
+    shSum.getRange(curRow, 5, rows3.length, 2).setNumberFormat('#,##0');
+    shSum.getRange(curRow, 7, rows3.length, 1).setNumberFormat('#,##0.000');
+    shSum.getRange(curRow, 8, rows3.length, 1).setNumberFormat('0.0%');
+    curRow += rows3.length;
+
+    shSum.getRange(curRow, 1, 1, 9).setValues([[
+      '',
+      'TỔNG CỘNG',
+      '—',
+      dateList.length + ' nhóm Date',
+      totalProducts,
+      totalScans,
+      totalKg,
+      totalGrams > 0 ? 1 : 0,
+      ''
+    ]]).setBackground('#E2E8F0').setFontWeight('bold').setVerticalAlignment('middle');
+    shSum.getRange(curRow, 2, 1, 5).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 5, 1, 2).setNumberFormat('#,##0');
+    shSum.getRange(curRow, 7, 1, 1).setNumberFormat('#,##0.000');
+    shSum.getRange(curRow, 8, 1, 1).setNumberFormat('0.0%');
+  } else {
+    shSum.getRange(curRow, 1, 1, 9).merge().setValue('Chưa có dữ liệu tổng hợp theo Date.').setHorizontalAlignment('center').setFontColor('#64748B');
+  }
+
+  const sumWidths = [55, 120, 235, 165, 125, 165, 150, 135, 360];
   for (let c = 0; c < sumWidths.length; c++) {
     shSum.setColumnWidth(c + 1, sumWidths[c]);
   }
 
-  return { totalScans: totalScans, totalProducts: totalProducts, totalKg: totalKg };
+  return {
+    totalScans: totalScans,
+    totalProducts: totalProducts,
+    totalDateLots: knownDateLotsCount,
+    totalKg: totalKg
+  };
 }
 
 function readCatalogRecords(ss) {
@@ -677,4 +1090,4 @@ function jsonResponse(obj) {
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
-/* END_OF_CODE_GS_V9 */
+/* END_OF_CODE_GS_V10 */

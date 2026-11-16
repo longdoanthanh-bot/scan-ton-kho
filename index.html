@@ -10,7 +10,7 @@
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=14">
+  <link rel="stylesheet" href="./styles.css?v=15">
 </head>
 <body>
 
@@ -106,7 +106,7 @@
           <!-- Khung ngắm trọn cả tem (Mã vạch phía trên + NSX / HSD phía dưới) -->
           <div class="barcode-aim-overlay">
             <div class="barcode-aim-box">
-              <div class="aim-zone-top">||||| MÃ VẠCH SỌC 13 SỐ • v14 |||||</div>
+              <div class="aim-zone-top">||||| MÃ VẠCH SỌC 13 SỐ • v15 |||||</div>
               <div class="laser-line"></div>
               <div class="aim-zone-divider"></div>
               <div class="aim-zone-bottom">📅 NSX &amp; HSD (Góc trái dưới tem — đưa trọn vào khung)</div>
@@ -250,22 +250,28 @@
       </section>
     </div>
 
-    <!-- ==================== TAB 3: TỔNG HỢP THEO SẢN PHẨM ==================== -->
+    <!-- ==================== TAB 3: TỔNG HỢP TỒN ĐA CHIỀU (THEO SKU & THEO DATE) ==================== -->
     <div id="tabSummary" class="tab-view">
       <section class="section-card">
         <div class="section-header">
-          <h2 class="section-title">📊 Tổng hợp tồn theo từng sản phẩm</h2>
+          <h2 class="section-title">📊 Tổng hợp tồn theo SKU &amp; theo Date</h2>
           <div style="display:flex;gap:6px;">
             <button type="button" id="btnForceSyncNow" class="btn btn-primary" style="padding:7px 11px;font-size:12.5px;">🔄 Đẩy lên GG Sheet</button>
             <button type="button" id="btnExportExcel2" class="btn btn-success" style="padding:7px 11px;font-size:12.5px;">📥 Xuất Excel</button>
           </div>
         </div>
+        <div class="summary-dim-bar" id="summaryDimBar">
+          <button type="button" class="summary-dim-btn active" data-dim="sku_date">📦 SKU × Date</button>
+          <button type="button" class="summary-dim-btn" data-dim="sku">🏷️ Theo SKU</button>
+          <button type="button" class="summary-dim-btn" data-dim="date">📅 Theo Date</button>
+        </div>
         <div style="overflow-x:auto;">
           <table class="summary-table">
-            <thead>
+            <thead id="summaryTableHead">
               <tr>
-                <th>Mã SP</th>
-                <th>Tên sản phẩm & Lô NSX/HSD</th>
+                <th>Mã SKU</th>
+                <th>Tên SP &amp; Hạn dùng</th>
+                <th>NSX → HSD (Date)</th>
                 <th class="num">Số tem</th>
                 <th class="num">Số ký (Kg)</th>
               </tr>
@@ -307,7 +313,7 @@
         <div class="settings-hero-top">
           <div>
             <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-            <div class="brand-sub">Bản v14 Siêu Tốc • Chốt mã 0.1s • Đặc trị đọc NSX/HSD góc trái dưới tem B2B phồng cong &amp; Tự bù rảnh tay • Tự khớp 2 chiều GG Sheet</div>
+            <div class="brand-sub">Bản v15 Siêu Tốc • Chốt mã 0.1s • Đọc siêu tốc NSX/HSD mọi góc/lóa/cong (Chống nhầm năm) • Báo cáo tồn theo SKU &amp; Date</div>
           </div>
           <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
             <span id="syncStatusDot" class="sync-dot"></span>
@@ -368,7 +374,7 @@
     </button>
     <button type="button" class="nav-item" data-tab="tabSummary">
       <span class="nav-icon">📊</span>
-      <span>Theo Mã</span>
+      <span>SKU / Date</span>
     </button>
     <button type="button" class="nav-item" data-tab="tabCatalog">
       <span class="nav-icon">🗂️</span>
@@ -509,10 +515,10 @@
   </div>
 
   <!-- Bộ giải mã mã vạch 1D + Bộ đọc chữ NSX/HSD trên tem nạp cục bộ 100% (chạy mượt cả khi mất mạng) -->
-  <script src="./vendor/zxing_wasm_reader.js?v=14"></script>
-  <script src="./vendor/ocr/tesseract.min.js?v=14"></script>
-  <script src="./catalog.js?v=14"></script>
-  <script src="./apps_script_embed.js?v=14"></script>
-  <script src="./app.js?v=14"></script>
+  <script src="./vendor/zxing_wasm_reader.js?v=15"></script>
+  <script src="./vendor/ocr/tesseract.min.js?v=15"></script>
+  <script src="./catalog.js?v=15"></script>
+  <script src="./apps_script_embed.js?v=15"></script>
+  <script src="./app.js?v=15"></script>
 </body>
 </html>

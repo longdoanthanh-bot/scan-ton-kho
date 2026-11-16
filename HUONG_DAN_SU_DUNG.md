@@ -1,4 +1,4 @@
-# 📦 HƯỚNG DẪN SỬ DỤNG APP QUÉT TỒN KHO TEM MÃ VẠCH — BẢN v14 SIÊU TỐC
+# 📦 HƯỚNG DẪN SỬ DỤNG APP QUÉT TỒN KHO TEM MÃ VẠCH — BẢN v15 SIÊU TỐC
 
 Ứng dụng quét **dải mã vạch sọc 13 số** kết hợp **tự động đọc Ngày sản xuất (NSX) & Hạn sử dụng (HSD)** trên tem cân (ví dụ: `1010040051985` → Mã sản phẩm `10040` - *Chân giò heo trước*, Khối lượng `5.198 Kg`, `NSX: 12/11/2026`, `HSD: 15/11/2026`), **khóa cứng không quét nhầm ô vuông ở góc tem**, hoạt động **100% cả khi mất mạng** và **tự động đồng bộ 2 chiều với Google Sheet `SCAN TỒN`**.
 
@@ -31,10 +31,14 @@ Chỉ cần điện thoại hoặc máy kiểm kho cầm tay (PDA) có 4G / 5G /
 
 ---
 
-## 📊 3. KẾT NỐI SẴN GOOGLE SHEET "SCAN TỒN" & TỰ ĐỘNG KHỚP 2 CHIỀU
+## 📊 3. BÁO CÁO TỔNG HỢP TỒN THEO SKU & THEO DATE TRÊN GOOGLE SHEET "SCAN TỒN"
 
 - Ứng dụng đã gắn sẵn trực tiếp vào bảng tính **`SCAN TỒN`**:
   👉 `https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0`
+- Trang **`Tong_Hop_Ton`** trên Google Sheet (cũng như tab **`📊 SKU / Date`** ngay trên màn hình điện thoại) tự động tổng hợp tồn kho theo **3 chiều đầy đủ**:
+  1. **Theo Mã SKU × Theo Date (`NSX / HSD`)**: Chi tiết từng mã hàng ở từng lô hạn dùng kèm cảnh báo số ngày còn lại.
+  2. **Gộp Theo Mã Sản Phẩm (`SKU`)**: Tổng số tem, tổng số ký, bình quân Kg/tem và chi tiết từng Date của mỗi mã.
+  3. **Gộp Theo Date (`HSD / NSX`)**: Sắp xếp hạn dùng sớm lên đầu để ưu tiên xuất trước, kèm danh sách các mã hàng thuộc từng Date.
 - Khi bạn xóa hoặc sửa dòng trực tiếp trên trang **`Chi_Tiet_Scan`** của Google Sheet, màn hình điện thoại đang mở sẽ **tự động cập nhật lại số tem và số ký theo dữ liệu thực trên bảng tính** trong vòng vài giây mà không cần bấm nút làm mới.
 
 ---

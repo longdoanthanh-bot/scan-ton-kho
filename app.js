@@ -55,8 +55,9 @@
   let pendingDuplicateDates = null;
   let pendingDuplicateDateCtx = null;
   let dateOnlyTarget = 'latest';
+  let currentSummaryDim = 'sku_date';
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v14';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v15';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // Camera, WASM, Live Pre-Lock Radar & Async Offline OCR state
@@ -723,21 +724,21 @@
       });
     }
 
-    // Lượt A: Bắt chuẩn ngày 4 số năm có dấu chấm, phẩy, gạch chéo, gạch ngang, hai chấm hoặc khoảng trắng (kể cả dấu chấm mờ thành khoảng trắng: 12 . 11 . 2026)
-    const regexSep = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])[.,\/:\-\s]{1,5}(0?[1-9]|1[0-2])[.,\/:\-\s]{1,5}(20[23]\d)(?!\d)/g;
+    // Lượt A: Bắt chuẩn ngày 4 số năm có dấu chấm, phẩy, gạch chéo, gạch ngang, hai chấm hoặc khoảng trắng ngang (không ăn sang dòng khác!)
+    const regexSep = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])[.,\/:\- \t]{1,5}(0?[1-9]|1[0-2])[.,\/:\- \t]{1,5}(20[23]\d)(?!\d)/g;
     let m;
     while ((m = regexSep.exec(text)) !== null) {
       tryPushCandidate(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10), m.index, m[0].length, false);
     }
 
     // Lượt A2: Cứu trường hợp nếp nhăn bao bì sát sau chữ số năm tạo thêm 1 số nhiễu (VD: 12.11.20261) khi có dấu chấm/gạch rõ ràng cả hai bên
-    const regexDotSpeckle = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])\s*[.,\/-]\s*(0?[1-9]|1[0-2])\s*[.,\/-]\s*(20[23]\d)\d(?!\d)/g;
+    const regexDotSpeckle = /(?:^|[^\d])(0?[1-9]|[12]\d|3[01])[ \t]*[.,\/-][ \t]*(0?[1-9]|1[0-2])[ \t]*[.,\/-][ \t]*(20[23]\d)\d(?!\d)/g;
     while ((m = regexDotSpeckle.exec(text)) !== null) {
       tryPushCandidate(parseInt(m[1], 10), parseInt(m[2], 10), parseInt(m[3], 10), m.index, m[0].length, false);
     }
 
     // Lượt B: Bắt trường hợp ảnh hơi mờ làm mất 1 hoặc 2 dấu chấm nhỏ (VD: 12.112026, 1211.2026, hoặc NSX: 12112026)
-    const regexCompact = /(?:^|[^\d])(0[1-9]|[12]\d|3[01])([.,\/:\-\s]?)(0[1-9]|1[0-2])([.,\/:\-\s]?)(20[23]\d)(?!\d)/g;
+    const regexCompact = /(?:^|[^\d])(0[1-9]|[12]\d|3[01])([.,\/:\- \t]?)(0[1-9]|1[0-2])([.,\/:\- \t]?)(20[23]\d)(?!\d)/g;
     while ((m = regexCompact.exec(text)) !== null) {
       const hasAnySep = Boolean(m[2] || m[4]);
       tryPushCandidate(parseInt(m[1], 10), parseInt(m[3], 10), parseInt(m[5], 10), m.index, m[0].length, !hasAnySep);
@@ -766,16 +767,19 @@
       }
     }
 
+    const DAY_MS = 86400000;
+    // Quy luật vật lý Fail-Closed: Ngày sản xuất (NSX) in trên tem hàng trong kho KHÔNG BAO GIỜ nằm ở tương lai xa (> hôm nay + 30 ngày, VD: nhầm 2026 thành 2028)!
+    const maxValidNsxEpoch = Date.now() + 30 * DAY_MS;
+
     if (unique.length >= 2) {
       // Bảo vệ thứ tự vật lý trên tem (NSX luôn in trước/trên HSD):
       // Nếu ngày thứ nhất lại lớn hơn ngày thứ hai (VD: dòng dưới 2026 bị mờ thành 2025 hoặc dòng trên 2026 bị mờ thành 2028)
-      // mà dòng đầu KHÔNG có nhãn HSD -> tuyệt đối không đảo ngược sai, chỉ giữ dòng có nhãn rõ để lượt đọc kế tiếp (80ms sau) lấy chuẩn ngày còn lại!
-      const DAY_MS = 86400000;
+      // mà dòng đầu KHÔNG có nhãn HSD -> tuyệt đối không đảo ngược sai, chỉ giữ dòng có nhãn rõ để lượt đọc kế tiếp lấy chuẩn ngày còn lại!
       if (
         unique[0].epoch > unique[1].epoch &&
         !OCR_HSD_PREFIX_RE.test(unique[0].prefixCtx)
       ) {
-        if (OCR_NSX_PREFIX_RE.test(unique[0].prefixCtx) && !OCR_HSD_PREFIX_RE.test(unique[1].prefixCtx)) {
+        if (OCR_NSX_PREFIX_RE.test(unique[0].prefixCtx) && !OCR_HSD_PREFIX_RE.test(unique[1].prefixCtx) && unique[0].epoch <= maxValidNsxEpoch) {
           return { nsx: unique[0].str, hsd: '' };
         }
         if (OCR_HSD_PREFIX_RE.test(unique[1].prefixCtx) && !OCR_NSX_PREFIX_RE.test(unique[0].prefixCtx)) {
@@ -786,15 +790,24 @@
       unique.sort(function (a, b) { return a.epoch - b.epoch; });
       const firstU = unique[0];
       const lastU = unique[unique.length - 1];
+      const isFutureNsx = Boolean(firstU.epoch > maxValidNsxEpoch);
+      const isWideGap = Boolean((lastU.epoch - firstU.epoch) > 350 * DAY_MS);
       return {
         nsx: firstU.str,
         hsd: lastU.str,
-        suspectYearGap: Boolean((lastU.epoch - firstU.epoch) > 350 * DAY_MS)
+        suspectYearGap: Boolean(isWideGap || isFutureNsx),
+        suspectFutureNsx: isFutureNsx
       };
     }
 
     if (found.length >= 2 && found[0].str === found[1].str) {
-      return { nsx: found[0].str, hsd: found[1].str };
+      const isFutSame = Boolean(found[0].epoch > maxValidNsxEpoch);
+      return {
+        nsx: found[0].str,
+        hsd: found[1].str,
+        suspectYearGap: isFutSame,
+        suspectFutureNsx: isFutSame
+      };
     }
 
     // Chỉ đọc rõ được 1 ngày duy nhất -> kiểm tra nhãn NSX hay HSD đi kèm, tuyệt đối không tự đoán ngày còn lại!
@@ -803,16 +816,23 @@
       return { nsx: '', hsd: single.str };
     }
     if (OCR_NSX_PREFIX_RE.test(single.prefixCtx)) {
-      return { nsx: single.str, hsd: '' };
+      const isFutSingle = Boolean(single.epoch > maxValidNsxEpoch);
+      return {
+        nsx: single.str,
+        hsd: '',
+        suspectYearGap: isFutSingle,
+        suspectFutureNsx: isFutSingle
+      };
     }
     return { nsx: '', hsd: '' };
   }
 
-  function enhanceSoftGrayscaleCanvas(srcCanvas) {
+  function enhanceSoftGrayscaleCanvas(srcCanvas, customPad, gamma, customLowRatio) {
     const w = srcCanvas.width;
     const h = srcCanvas.height;
     const out = document.createElement('canvas');
-    const pad = 22;
+    const pad = typeof customPad === 'number' ? customPad : 14;
+    const useGamma = (typeof gamma === 'number' && gamma > 0 && gamma !== 1) ? gamma : 1;
     out.width = w + pad * 2;
     out.height = h + pad * 2;
     const oCtx = out.getContext('2d', { willReadFrequently: true });
@@ -838,8 +858,9 @@
       sum += hist[k];
       if (sum >= total * 0.12) { high = k; break; }
     }
-    // Ảnh đủ sáng (nền giấy >= 115): giữ điểm đen siêu mảnh 0.1% để bảo toàn tuyệt đối khe hở chữ số 6 ở cự ly xa; ảnh kho lạnh tối (< 115): kéo 1.8% để nét chữ đen rõ!
-    const lowRatio = high < 115 ? 0.018 : 0.001;
+    const lowRatio = (typeof customLowRatio === 'number' && customLowRatio > 0)
+      ? customLowRatio
+      : (high < 115 ? 0.018 : (useGamma < 1 ? 0.005 : 0.002));
     let low = 30;
     sum = 0;
     for (let k = 0; k < 256; k++) {
@@ -849,7 +870,10 @@
     const span = Math.max(14, high - low);
 
     for (let i = 0, p = 0; i < lumArr.length; i++, p += 4) {
-      const stretched = Math.max(0, Math.min(255, Math.round(((lumArr[i] - low) * 255) / span)));
+      let t = (lumArr[i] - low) / span;
+      if (t < 0) t = 0;
+      else if (t > 1) t = 1;
+      const stretched = useGamma !== 1 ? Math.round(Math.pow(t, useGamma) * 255) : Math.round(t * 255);
       d[p] = stretched;
       d[p + 1] = stretched;
       d[p + 2] = stretched;
@@ -859,12 +883,92 @@
     return out;
   }
 
-  // Khôi phục độ sắc nét cho chữ nhỏ & dấu chấm '.' khi điện thoại đưa sát 12-18cm (ngoài khoảng lấy nét tối thiểu) hoặc luồng hình 720p bị mờ
-  function sharpenDefocusedTextCanvas(srcCanvas) {
+  // Bộ cân bằng sáng cục bộ chống lóa nilông, chống sọc màn hình & giữ mở khe hở chữ số 6 ở cự ly xa (~1.8ms)
+  function enhanceLocalGlareAndLcdCanvas(srcCanvas, customPad) {
     const w = srcCanvas.width;
     const h = srcCanvas.height;
     const out = document.createElement('canvas');
-    const pad = 22;
+    const pad = typeof customPad === 'number' ? customPad : 14;
+    out.width = w + pad * 2;
+    out.height = h + pad * 2;
+    const oCtx = out.getContext('2d', { willReadFrequently: true });
+    oCtx.fillStyle = '#ffffff';
+    oCtx.fillRect(0, 0, out.width, out.height);
+    oCtx.drawImage(srcCanvas, pad, pad);
+
+    const img = oCtx.getImageData(pad, pad, w, h);
+    const d = img.data;
+    const total = w * h;
+    const lum = new Uint8Array(total);
+    for (let i = 0, p = 0; i < total; i++, p += 4) {
+      lum[i] = (d[p] * 77 + d[p + 1] * 150 + d[p + 2] * 29) >> 8;
+    }
+
+    // Làm mịn nhẹ 3x3 [1, 2, 1] ở độ phân giải đã phóng to: xóa sạch sóng điểm ảnh màn hình mà không bào mòn nét dưới của chữ số 6
+    const hSmooth = new Uint16Array(total);
+    for (let y = 0; y < h; y++) {
+      const ro = y * w;
+      for (let x = 0; x < w; x++) {
+        const xm1 = x > 0 ? x - 1 : 0;
+        const xp1 = x + 1 < w ? x + 1 : w - 1;
+        hSmooth[ro + x] = lum[ro + xm1] + (lum[ro + x] << 1) + lum[ro + xp1];
+      }
+    }
+    const smooth = new Uint8Array(total);
+    const stride = w + 1;
+    const integral = new Float64Array((w + 1) * (h + 1));
+    for (let y = 0; y < h; y++) {
+      const ym1 = (y > 0 ? y - 1 : 0) * w;
+      const y0 = y * w;
+      const yp1 = (y + 1 < h ? y + 1 : h - 1) * w;
+      const intOff = (y + 1) * stride;
+      const prevIntOff = y * stride;
+      let rowSum = 0;
+      for (let x = 0; x < w; x++) {
+        const s = (hSmooth[ym1 + x] + (hSmooth[y0 + x] << 1) + hSmooth[yp1 + x] + 8) >> 4;
+        smooth[y0 + x] = s;
+        rowSum += s;
+        integral[intOff + x + 1] = integral[prevIntOff + x + 1] + rowSum;
+      }
+    }
+
+    const R = Math.max(18, Math.round(Math.min(w, h) * 0.12));
+    for (let y = 0; y < h; y++) {
+      const y0 = Math.max(0, y - R);
+      const y1 = Math.min(h - 1, y + R);
+      const r0 = y0 * stride;
+      const r1 = (y1 + 1) * stride;
+      const ro = y * w;
+      for (let x = 0; x < w; x++) {
+        const x0 = Math.max(0, x - R);
+        const x1 = Math.min(w - 1, x + R);
+        const cnt = (x1 - x0 + 1) * (y1 - y0 + 1);
+        const localMean = (integral[r1 + x1 + 1] - integral[r0 + x1 + 1] - integral[r1 + x0] + integral[r0 + x0]) / cnt;
+        const rel = localMean > 10 ? (smooth[ro + x] / localMean) : 1;
+        let outV = 255;
+        if (rel <= 0.74) {
+          outV = 0;
+        } else if (rel < 0.955) {
+          const t = (rel - 0.74) / 0.215;
+          outV = Math.max(0, Math.min(255, Math.round(Math.pow(t, 0.80) * 255)));
+        }
+        const p = (ro + x) * 4;
+        d[p] = outV;
+        d[p + 1] = outV;
+        d[p + 2] = outV;
+        d[p + 3] = 255;
+      }
+    }
+    oCtx.putImageData(img, pad, pad);
+    return out;
+  }
+
+  // Khôi phục độ sắc nét cho chữ nhỏ & dấu chấm '.' khi điện thoại đưa sát 12-18cm (ngoài khoảng lấy nét tối thiểu) hoặc luồng hình 720p bị mờ
+  function sharpenDefocusedTextCanvas(srcCanvas, customPad) {
+    const w = srcCanvas.width;
+    const h = srcCanvas.height;
+    const out = document.createElement('canvas');
+    const pad = typeof customPad === 'number' ? customPad : 14;
     out.width = w + pad * 2;
     out.height = h + pad * 2;
     const oCtx = out.getContext('2d', { willReadFrequently: true });
@@ -890,7 +994,7 @@
       sum += hist[k];
       if (sum >= total * 0.12) { high = k; break; }
     }
-    const lowRatio = high < 115 ? 0.016 : 0.0015;
+    const lowRatio = high < 115 ? 0.016 : 0.002;
     let low = 28;
     sum = 0;
     for (let k = 0; k < 256; k++) {
@@ -926,7 +1030,7 @@
       for (let x = 0; x < w; x++) {
         const idx = y0 + x;
         const b = (hBlur[ym2 + x] + hBlur[ym1 + x] * 3 + hBlur[idx] * 4 + hBlur[yp1 + x] * 3 + hBlur[yp2 + x]) / 12;
-        const sv = Math.round(norm[idx] + 1.55 * (norm[idx] - b));
+        const sv = Math.round(norm[idx] + 1.25 * (norm[idx] - b));
         const clamped = sv < 0 ? 0 : (sv > 255 ? 255 : sv);
         const p = idx * 4;
         d[p] = clamped;
@@ -1268,14 +1372,14 @@
     const uMin = ((customBounds && typeof customBounds.uMin === 'number') ? customBounds.uMin : -0.96) * bw;
     const uSpan = ((customBounds && typeof customBounds.uSpan === 'number') ? customBounds.uSpan : 1.38) * bw;
     const vMin = ((customBounds && typeof customBounds.vMin === 'number') ? customBounds.vMin : 0.34) * bw;
-    const vSpan = ((customBounds && typeof customBounds.vSpan === 'number') ? customBounds.vSpan : 1.02) * bw;
+    const vSpan = ((customBounds && typeof customBounds.vSpan === 'number') ? customBounds.vSpan : 0.94) * bw;
 
-    // Phóng vùng chữ lên chuẩn 620px chiều ngang sọc (hỗ trợ tới 5.6x cho tem cầm xa 30-45cm trên ống kính rộng ĐT, giữ nguyên khe hở chữ số 6)!
-    const targetBw = (customBounds && typeof customBounds.targetBw === 'number') ? customBounds.targetBw : 620;
-    const minScale = (customBounds && typeof customBounds.minScale === 'number') ? customBounds.minScale : 1.45;
-    const scale = Math.min(5.6, Math.max(minScale, targetBw / bw));
-    const outW = Math.max(180, Math.round(uSpan * scale));
-    const outH = Math.max(90, Math.round(vSpan * scale));
+    // Tỷ lệ vàng 460px chiều ngang sọc: nhẹ hơn 2.4 lần cho chip điện thoại mà vẫn giữ nguyên nét chữ số 6 ở cự ly xa 35-50cm!
+    const targetBw = (customBounds && typeof customBounds.targetBw === 'number') ? customBounds.targetBw : 460;
+    const minScale = (customBounds && typeof customBounds.minScale === 'number') ? customBounds.minScale : 1.20;
+    const scale = Math.min(5.2, Math.max(minScale, targetBw / bw));
+    const outW = Math.max(150, Math.round(uSpan * scale));
+    const outH = Math.max(78, Math.round(vSpan * scale));
 
     const roi = document.createElement('canvas');
     roi.width = outW;
@@ -1284,12 +1388,6 @@
     const paperRgb = sampleBrightPaperRgb(fullCanvas, cx, cy);
     rCtx.fillStyle = paperRgb;
     rCtx.fillRect(0, 0, outW, outH);
-
-    const clean1x = tryDescreenPeriodicScanlines1x(fullCanvas, cx, cy, angle, uMin, vMin, uSpan, vSpan, paperRgb);
-    if (clean1x) {
-      rCtx.drawImage(clean1x, 0, 0, clean1x.width, clean1x.height, 0, 0, outW, outH);
-      return roi;
-    }
 
     rCtx.save();
     rCtx.scale(scale, scale);
@@ -1396,75 +1494,101 @@
     }
   }
 
+  function parseStrDateEpochLocal(s) {
+    if (!s) return NaN;
+    const parts = String(s).split('/');
+    if (parts.length !== 3) return NaN;
+    return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10)).getTime();
+  }
+
+  // Cầu dao vật lý Fail-Closed cho kết quả NSX/HSD trước khi trả ra ngoài:
+  // Loại bỏ hoàn toàn trường hợp bóng lóa nặng biến năm 2026 thành tương lai xa (VD: NSX 2028) mà không lượt nào xác thực lại được!
+  function finalizeSafeDatePair(pair) {
+    if (!pair) return { nsx: '', hsd: '' };
+    let nsx = pair.nsx || '';
+    let hsd = pair.hsd || '';
+    const DAY_MS = 86400000;
+    const maxValidNsxEpoch = Date.now() + 30 * DAY_MS;
+    const tN = parseStrDateEpochLocal(nsx);
+    const tH = parseStrDateEpochLocal(hsd);
+
+    if (!isNaN(tN) && tN > maxValidNsxEpoch) {
+      nsx = '';
+      if (!isNaN(tH) && tH >= tN && (tH - Date.now()) > 400 * DAY_MS) {
+        hsd = '';
+      }
+    }
+    if (nsx && hsd && !isNaN(tN) && !isNaN(tH)) {
+      if (tN > tH) {
+        return { nsx: '', hsd: '' };
+      }
+      if (pair.suspectYearGap && (tH - tN) > 650 * DAY_MS) {
+        // Nếu chênh lệch > 650 ngày trên tem cân ký mà cờ nghi lệch năm vẫn bật (VD: 15/11/2026 -> 18/11/2028), để trống phần HSD bị nhòe thay vì ghi sai năm!
+        hsd = '';
+      }
+    }
+    return { nsx: nsx, hsd: hsd };
+  }
+
   function mergeDatePair(base, next) {
     if (!next || (!next.nsx && !next.hsd)) {
       return {
         nsx: (base && base.nsx) ? base.nsx : '',
         hsd: (base && base.hsd) ? base.hsd : '',
-        suspectYearGap: Boolean(base && base.suspectYearGap)
+        suspectYearGap: Boolean(base && base.suspectYearGap),
+        suspectFutureNsx: Boolean(base && base.suspectFutureNsx)
       };
     }
     if (!base || (!base.nsx && !base.hsd)) {
       return {
         nsx: next.nsx || '',
         hsd: next.hsd || '',
-        suspectYearGap: Boolean(next.suspectYearGap)
+        suspectYearGap: Boolean(next.suspectYearGap),
+        suspectFutureNsx: Boolean(next.suspectFutureNsx)
       };
     }
-    // Nếu kết quả trước bị nghi lệch năm (VD: chữ số 6 vuông bị đọc nhầm thành 2028):
-    // - Nếu lượt sau đọc sạch cả 2 ngày khớp năm -> ưu tiên lượt sạch 100%!
-    // - Nếu lượt sau đọc rõ 1 ngày (NSX hoặc HSD) mà khi ghép vào sẽ khớp cùng năm hợp lệ (<= 350 ngày) -> thay thế ngay nửa bị nhiễu năm!
     if (base.suspectYearGap && next.nsx && next.hsd && !next.suspectYearGap) {
-      return { nsx: next.nsx, hsd: next.hsd, suspectYearGap: false };
+      return { nsx: next.nsx, hsd: next.hsd, suspectYearGap: false, suspectFutureNsx: false };
     }
-    if (base.suspectYearGap && (next.nsx || next.hsd)) {
-      const bN = (base.nsx || '').split('/');
-      const bH = (base.hsd || '').split('/');
-      const minBaseYear = (bN.length === 3 && bH.length === 3)
-        ? Math.min(parseInt(bN[2], 10), parseInt(bH[2], 10))
-        : 9999;
-      const candNsx = next.nsx || base.nsx || '';
+    if (base.suspectYearGap && (next.nsx || next.hsd) && !next.suspectFutureNsx) {
+      const DAY_MS = 86400000;
+      const maxValidNsx = Date.now() + 30 * DAY_MS;
+      const candNsx = next.nsx || (base.suspectFutureNsx ? '' : (base.nsx || ''));
       const candHsd = next.hsd || base.hsd || '';
-      const cN = candNsx.split('/');
-      const cH = candHsd.split('/');
-      if (cN.length === 3 && cH.length === 3) {
-        const yN = parseInt(cN[2], 10);
-        const yH = parseInt(cH[2], 10);
-        const ctN = new Date(yN, parseInt(cN[1], 10) - 1, parseInt(cN[0], 10)).getTime();
-        const ctH = new Date(yH, parseInt(cH[1], 10) - 1, parseInt(cH[0], 10)).getTime();
-        if (yN <= minBaseYear && yH <= minBaseYear && ctH >= ctN && (ctH - ctN) <= 350 * 86400000) {
-          return { nsx: candNsx, hsd: candHsd, suspectYearGap: false };
-        }
+      const ctN = parseStrDateEpochLocal(candNsx);
+      const ctH = parseStrDateEpochLocal(candHsd);
+      if (!isNaN(ctN) && !isNaN(ctH) && ctN <= maxValidNsx && ctH >= ctN && (ctH - ctN) <= 350 * DAY_MS) {
+        return { nsx: candNsx, hsd: candHsd, suspectYearGap: false, suspectFutureNsx: false };
       }
     }
     if (next.suspectYearGap && base.nsx && base.hsd && !base.suspectYearGap) {
-      return { nsx: base.nsx, hsd: base.hsd, suspectYearGap: false };
+      return { nsx: base.nsx, hsd: base.hsd, suspectYearGap: false, suspectFutureNsx: false };
     }
-    if (next.nsx && next.hsd && (!base.nsx || !base.hsd)) {
+    if (next.nsx && next.hsd && (!base.nsx || !base.hsd) && !next.suspectFutureNsx) {
       return {
         nsx: next.nsx,
         hsd: next.hsd,
-        suspectYearGap: Boolean(next.suspectYearGap)
+        suspectYearGap: Boolean(next.suspectYearGap),
+        suspectFutureNsx: Boolean(next.suspectFutureNsx)
       };
     }
-    const mergedNsx = base.nsx || next.nsx || '';
+    const mergedNsx = (!base.suspectFutureNsx && base.nsx) ? base.nsx : (next.nsx || base.nsx || '');
     const mergedHsd = base.hsd || next.hsd || '';
-    let mergedSuspect = Boolean(base.suspectYearGap || next.suspectYearGap);
+    const mFut = Boolean((parseStrDateEpochLocal(mergedNsx) || 0) > (Date.now() + 30 * 86400000));
+    let mergedSuspect = Boolean(base.suspectYearGap || next.suspectYearGap || mFut);
     if (mergedNsx && mergedHsd) {
-      const pN = mergedNsx.split('/');
-      const pH = mergedHsd.split('/');
-      if (pN.length === 3 && pH.length === 3) {
-        const tN = new Date(parseInt(pN[2], 10), parseInt(pN[1], 10) - 1, parseInt(pN[0], 10)).getTime();
-        const tH = new Date(parseInt(pH[2], 10), parseInt(pH[1], 10) - 1, parseInt(pH[0], 10)).getTime();
+      const tN = parseStrDateEpochLocal(mergedNsx);
+      const tH = parseStrDateEpochLocal(mergedHsd);
+      if (!isNaN(tN) && !isNaN(tH)) {
         if (tN > tH) {
-          return (next.nsx && next.hsd)
-            ? { nsx: next.nsx, hsd: next.hsd, suspectYearGap: Boolean(next.suspectYearGap) }
-            : { nsx: base.nsx || '', hsd: base.hsd || '', suspectYearGap: Boolean(base.suspectYearGap) };
+          return (next.nsx && next.hsd && !next.suspectFutureNsx)
+            ? { nsx: next.nsx, hsd: next.hsd, suspectYearGap: Boolean(next.suspectYearGap), suspectFutureNsx: false }
+            : { nsx: base.nsx || '', hsd: base.hsd || '', suspectYearGap: Boolean(base.suspectYearGap), suspectFutureNsx: Boolean(base.suspectFutureNsx) };
         }
-        mergedSuspect = Boolean((tH - tN) > 400 * 86400000);
+        mergedSuspect = Boolean(mFut || (tH - tN) > 350 * 86400000);
       }
     }
-    return { nsx: mergedNsx, hsd: mergedHsd, suspectYearGap: mergedSuspect };
+    return { nsx: mergedNsx, hsd: mergedHsd, suspectYearGap: mergedSuspect, suspectFutureNsx: mFut };
   }
 
   // Đo nhanh điểm "giấy trắng có chữ mực đen" ở vùng dưới (+v) so với vùng trên (-v) của mã vạch (~0.15ms):
@@ -1563,238 +1687,250 @@
 
     // TRƯỜNG HỢP 1: ĐÃ BIẾT TỌA ĐỘ MÃ VẠCH (99% các ca quét Camera & Ảnh tem)
     if (barcodePos) {
-      // Vùng chuẩn bao trọn góc trái dưới cùng của cả tem Meatcool Bán lẻ lẫn tem B2B Kho (tách sạch mép ngoài tránh ăn nền tối kho lạnh!)
-      const rawRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0);
-      // Vùng tách riêng đúng cột chữ số ngày bên phải (u = -0.56..+0.30, v = 0.36..1.26):
-      // Tách sạch nhãn NSX:/HSD: bên trái -> triệt tiêu 100% hiện tượng cong bao bì làm chữ NSX: tụt thấp hơn dãy số ngày!
-      const datesColRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
-        uMin: -0.56,
-        uSpan: 0.86,
-        vMin: 0.36,
-        vSpan: 0.90,
-        targetBw: 620
-      });
-      const deepRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
-        uMin: -0.96,
-        uSpan: 1.38,
-        vMin: 0.34,
-        vSpan: 1.24
-      });
+      // Phát hiện tức thì 0.15ms nếu tem đang đặt lộn ngược 180° để đi thẳng vào mặt đúng ngay lượt 1!
+      let activeDeg = preferFlipped180BarcodeSide(fullCanvas, barcodePos) ? 180 : 0;
 
-      const inkCheckRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
-        uMin: -0.60,
-        uSpan: 1.00,
-        vMin: 0.52,
-        vSpan: 0.72,
-        targetBw: 260,
-        minScale: 0.8
-      });
-      const bottomZoneHasInk = canvasHasTextContrast(inkCheckRoi);
-      let softRawCanvas = null;
-      const getSoftRaw = function () {
-        if (!softRawCanvas && rawRoi) softRawCanvas = enhanceSoftGrayscaleCanvas(rawRoi);
-        return softRawCanvas;
+      const makeInkCheck = function (deg) {
+        return buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, deg, {
+          uMin: -0.60,
+          uSpan: 1.00,
+          vMin: 0.52,
+          vSpan: 0.72,
+          targetBw: 240,
+          minScale: 0.8
+        });
       };
 
-      // 1A: Xám mịn độ phân giải cao ở góc 0° (PSM 6 — ~85ms cho tem phẳng Bán lẻ & chụp xa 35-50cm)
-      if (bottomZoneHasInk && rawRoi && !isAborted()) {
-        await worker.setParameters({
-          tessedit_pageseg_mode: '6',
-          tessedit_char_whitelist: DATE_WHITELIST
-        });
-        const resSoft6 = await worker.recognize(getSoftRaw());
-        if (recordHit(resSoft6)) return best;
+      let bottomZoneHasInk = canvasHasTextContrast(makeInkCheck(activeDeg));
+      if (!bottomZoneHasInk) {
+        const altDeg = activeDeg === 0 ? 180 : 0;
+        if (canvasHasTextContrast(makeInkCheck(altDeg))) {
+          activeDeg = altDeg;
+          bottomZoneHasInk = true;
+        }
       }
 
-      // 1B: Khôi phục nét chữ mờ cận cảnh 12-18cm / luồng video Camera nén (~90ms, giữ chuẩn chữ số 6 trên luồng video trực tiếp!)
-      if (bottomZoneHasInk && rawRoi && !isAborted()) {
-        await worker.setParameters({
-          tessedit_pageseg_mode: '6',
-          tessedit_char_whitelist: DATE_WHITELIST
-        });
-        const resSharp6 = await worker.recognize(sharpenDefocusedTextCanvas(rawRoi));
-        if (recordHit(resSharp6)) return best;
-      }
-
-      // 1B-2: Tách đảo chữ độc lập ở tỷ lệ chuẩn 520px (PSM 11 trên nền xám mịn — ĐẶC TRỊ TEM B2B KHO DÁN TRÊN TÚI THỊT 6-8KG PHỒNG CONG ở mọi cự ly gần/vừa/xa, không bao giờ nhầm 2028 trên tem bóng đổ!)
       if (bottomZoneHasInk && !isAborted()) {
-        const b2bRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
+        // Vùng đầy đủ góc trái dưới của cả tem B2B Kho lẫn tem Bán lẻ ở tỷ lệ vàng 515px (vSpan=0.88 nằm trọn 100% trong giấy trắng, không dính nền tối ngoài mép dưới tem!)
+        const b2bRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, activeDeg, {
           uMin: -0.96,
           uSpan: 1.38,
           vMin: 0.34,
-          vSpan: 0.96,
-          targetBw: 520,
-          minScale: 1.15
+          vSpan: 0.94,
+          targetBw: 485,
+          minScale: 1.2
         });
-        if (b2bRoi) {
+        // Vùng tách riêng cột chữ số ngày bên phải (tách sạch chữ NSX:/HSD: đậm bên trái & viền khung đỏ!)
+        const datesColRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, activeDeg, {
+          uMin: -0.56,
+          uSpan: 0.84,
+          vMin: 0.35,
+          vSpan: 0.88,
+          targetBw: 580,
+          minScale: 1.25
+        });
+
+        let b2bSoft = null;
+        // 1A (Nhanh & chuẩn số 1): Tách cụm chữ độc lập trên nền xám mịn tự nhiên (PSM 11 — ~120ms ĐT: đọc 1 phát ăn ngay tem B2B phồng cong, màn hình máy tính, ngược 180° & giữ nguyên chữ số 6!)
+        if (b2bRoi && !isAborted()) {
+          b2bSoft = enhanceSoftGrayscaleCanvas(b2bRoi, 12);
           await worker.setParameters({
             tessedit_pageseg_mode: '11',
             tessedit_char_whitelist: DATE_WHITELIST
           });
-          const resB2b11 = await worker.recognize(enhanceSoftGrayscaleCanvas(b2bRoi));
-          if (recordHit(resB2b11)) return best;
+          const resB2bSoft11 = await worker.recognize(b2bSoft);
+          if (recordHit(resB2bSoft11)) return best;
         }
-      }
 
-      // 1C: Khử bóng đổ / Khử sọc màn hình máy tính & góc chúc kéo dài dọc 1.18x (~0.18s — đọc chuẩn tem bóng đổ trên luồng video!)
-      if (bottomZoneHasInk && (rawRoi || deepRoi) && !isAborted()) {
-        await worker.setParameters({
-          tessedit_pageseg_mode: '11',
-          tessedit_char_whitelist: DATE_WHITELIST
-        });
-        if (rawRoi && !isAborted()) {
-          const resFlat = await worker.recognize(flattenIlluminationToCanvas(rawRoi));
-          if (recordHit(resFlat)) return best;
-        }
-        if (deepRoi && !isAborted()) {
-          const resDeepFlat = await worker.recognize(flattenIlluminationToCanvas(deepRoi));
-          if (recordHit(resDeepFlat)) return best;
-        }
-      }
+        // 1B: Cột số ngày mở sáng trung tính gamma=0.72 (PSM 6 — ~95ms ĐT: đặc trị tem có viền đỏ, sọc màn hình & giữ mở khe chữ số 6!)
+        if (datesColRoi && !isAborted()) {
+          await worker.setParameters({
+            tessedit_pageseg_mode: '6',
+            tessedit_char_whitelist: DIGITS_ONLY_WHITELIST
+          });
+          const resColGamma = await worker.recognize(enhanceSoftGrayscaleCanvas(datesColRoi, 12, 0.72));
+          if (recordHit(resColGamma)) return best;
 
-      // 1C-2: Cắt riêng cột chữ số ngày bên phải trên nền xám mịn (~70ms, dự phòng cho tem B2B khung viền đỏ hoặc chỉ có boundingBox!)
-      if (bottomZoneHasInk && datesColRoi && !isAborted()) {
-        const colSoft = enhanceSoftGrayscaleCanvas(datesColRoi);
-        await worker.setParameters({
-          tessedit_pageseg_mode: '6',
-          tessedit_char_whitelist: DIGITS_ONLY_WHITELIST
-        });
-        const resColSoft = await worker.recognize(colSoft);
-        if (recordHit(resColSoft)) return best;
-      }
-
-      // 1D: Bù góc nghiêng tay cầm dư [-4°, +4°, -8°, +8°] ngay lập tức (~0.13s/góc, chuẩn cho kho lạnh tối 28% & ảnh nghiêng 5°..20°)
-      await worker.setParameters({
-        tessedit_pageseg_mode: '6',
-        tessedit_char_whitelist: DATE_WHITELIST
-      });
-      if (bottomZoneHasInk) {
-        const tiltMicroAngles = [-4, 4, -8, 8];
-        for (let tIdx = 0; tIdx < tiltMicroAngles.length; tIdx++) {
-          if (isAborted()) return best;
-          const adjRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, tiltMicroAngles[tIdx]);
-          if (adjRoi) {
-            const resAdj6 = await worker.recognize(enhanceSoftGrayscaleCanvas(adjRoi));
-            if (recordHit(resAdj6)) return best;
+          // 1C: Cột số ngày cân bằng lóa nilông cục bộ (đặc trị ánh đèn kho lạnh chiếu lóa mặt túi!)
+          if (!isAborted()) {
+            const resColLocal = await worker.recognize(enhanceLocalGlareAndLcdCanvas(datesColRoi, 12));
+            if (recordHit(resColLocal)) return best;
           }
         }
-      }
 
-      // 1E: Túi hàng đặt lộn ngược đầu [180°] hoặc cầm ngang 90° trên điện thoại Android (~0.16s)
-      if (!isAborted()) {
-        const roi180 = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 180);
-        if (roi180 && canvasHasTextContrast(roi180)) {
-          const soft180 = enhanceSoftGrayscaleCanvas(roi180);
+        // 1C-2: Khung gọn vSpan=0.88 nằm trọn 100% trong lòng giấy trắng (tránh viền tối mép dưới tem ở cự ly xa 38% làm nhòe chữ số 6 thành 8!)
+        if ((!best.nsx || !best.hsd || best.suspectYearGap) && !isAborted()) {
+          await worker.setParameters({
+            tessedit_pageseg_mode: '11',
+            tessedit_char_whitelist: DATE_WHITELIST
+          });
+          const farCrispScales = [520, 440];
+          for (let fIdx = 0; fIdx < farCrispScales.length; fIdx++) {
+            if (isAborted()) break;
+            const farB2b = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, activeDeg, {
+              uMin: -0.96,
+              uSpan: 1.36,
+              vMin: 0.35,
+              vSpan: 0.88,
+              targetBw: farCrispScales[fIdx],
+              minScale: 1.15
+            });
+            if (farB2b) {
+              const resFar11 = await worker.recognize(enhanceSoftGrayscaleCanvas(farB2b, 12, 1, 0.005));
+              if (recordHit(resFar11)) return best;
+            }
+          }
+        }
+
+        // 1D: Đọc dòng ngang chuẩn & khôi phục nét chữ mờ cận cảnh 12-18cm (PSM 6 / PSM 11 lóa)
+        if (b2bRoi && !isAborted()) {
           await worker.setParameters({
             tessedit_pageseg_mode: '6',
             tessedit_char_whitelist: DATE_WHITELIST
           });
-          const res180 = await worker.recognize(soft180);
-          if (recordHit(res180)) return best;
+          if (b2bSoft && !isAborted()) {
+            const resB2bSoft6 = await worker.recognize(b2bSoft);
+            if (recordHit(resB2bSoft6)) return best;
+          }
           if (!isAborted()) {
-            const datesCol180 = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 180, {
-              uMin: -0.56,
-              uSpan: 0.86,
-              vMin: 0.36,
-              vSpan: 0.90,
-              targetBw: 620
-            });
-            if (datesCol180) {
-              await worker.setParameters({
-                tessedit_pageseg_mode: '6',
-                tessedit_char_whitelist: DIGITS_ONLY_WHITELIST
-              });
-              const resCol180 = await worker.recognize(enhanceSoftGrayscaleCanvas(datesCol180));
-              if (recordHit(resCol180)) return best;
-            }
+            const resB2bSharp6 = await worker.recognize(sharpenDefocusedTextCanvas(b2bRoi, 12));
+            if (recordHit(resB2bSharp6)) return best;
           }
           if (!isAborted()) {
             await worker.setParameters({
               tessedit_pageseg_mode: '11',
               tessedit_char_whitelist: DATE_WHITELIST
             });
-            const res180Sparse = await worker.recognize(soft180);
-            if (recordHit(res180Sparse)) return best;
+            const resB2bLocal11 = await worker.recognize(enhanceLocalGlareAndLcdCanvas(b2bRoi, 12));
+            if (recordHit(resB2bLocal11)) return best;
           }
-          if (!isAborted()) {
+        }
+
+        // 1E: Bù góc nghiêng tay cầm dư [-6°, +6°, -13°, +13°] trên khung nhỏ gọn siêu tốc (kể cả khi Android chỉ trả về khung đứng 0°!)
+        const tiltMicroAngles = [-6, 6, -13, 13];
+        for (let tIdx = 0; tIdx < tiltMicroAngles.length; tIdx++) {
+          if (isAborted()) return best;
+          const degTry = activeDeg + tiltMicroAngles[tIdx];
+          const adjB2b = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, degTry, {
+            uMin: -0.96,
+            uSpan: 1.38,
+            vMin: 0.34,
+            vSpan: 0.94,
+            targetBw: 460,
+            minScale: 1.15
+          });
+          if (adjB2b) {
+            const adjSoft = enhanceSoftGrayscaleCanvas(adjB2b, 12);
+            await worker.setParameters({
+              tessedit_pageseg_mode: '11',
+              tessedit_char_whitelist: DATE_WHITELIST
+            });
+            const resAdj11 = await worker.recognize(adjSoft);
+            if (recordHit(resAdj11)) return best;
+            if (!isAborted()) {
+              await worker.setParameters({
+                tessedit_pageseg_mode: '6',
+                tessedit_char_whitelist: DATE_WHITELIST
+              });
+              const resAdj6 = await worker.recognize(adjSoft);
+              if (recordHit(resAdj6)) return best;
+            }
+          }
+        }
+
+        // 1F: Đảo 180° dự phòng nếu cả hai đầu trên/dưới của tem đều có chữ đậm tương đương nhau
+        const oppDeg = activeDeg === 0 ? 180 : 0;
+        if (!isAborted()) {
+          const oppCol = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, oppDeg, {
+            uMin: -0.56,
+            uSpan: 0.86,
+            vMin: 0.35,
+            vSpan: 0.86,
+            targetBw: 435,
+            minScale: 1.2
+          });
+          if (oppCol && canvasHasTextContrast(oppCol)) {
+            await worker.setParameters({
+              tessedit_pageseg_mode: '6',
+              tessedit_char_whitelist: DIGITS_ONLY_WHITELIST
+            });
+            const resOppCol = await worker.recognize(enhanceLocalGlareAndLcdCanvas(oppCol, 12));
+            if (recordHit(resOppCol)) return best;
+            if (!isAborted()) {
+              const oppB2b = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, oppDeg, {
+                uMin: -0.96,
+                uSpan: 1.38,
+                vMin: 0.34,
+                vSpan: 0.94,
+                targetBw: 450,
+                minScale: 1.2
+              });
+              if (oppB2b) {
+                await worker.setParameters({
+                  tessedit_pageseg_mode: '11',
+                  tessedit_char_whitelist: DATE_WHITELIST
+                });
+                const resOpp11 = await worker.recognize(enhanceSoftGrayscaleCanvas(oppB2b, 12));
+                if (recordHit(resOpp11)) return best;
+              }
+            }
+          }
+        }
+
+        // 1G: Mở rộng toàn chiều ngang tem cân kho/siêu thị (cho loại tem in NSX bên trái — HSD bên phải sang tận mép phải hoặc năm 2 số!)
+        if (!isAborted()) {
+          const wideScaleRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, activeDeg, {
+            uMin: -1.04,
+            uSpan: 2.08,
+            vMin: 0.36,
+            vSpan: 1.20,
+            targetBw: 410,
+            minScale: 1.0
+          });
+          if (wideScaleRoi) {
             await worker.setParameters({
               tessedit_pageseg_mode: '6',
               tessedit_char_whitelist: DATE_WHITELIST
             });
-            const res180Sharp = await worker.recognize(sharpenDefocusedTextCanvas(roi180));
-            if (recordHit(res180Sharp)) return best;
+            if (!isAborted()) {
+              const resWide6 = await worker.recognize(enhanceSoftGrayscaleCanvas(wideScaleRoi, 12));
+              if (recordHit(resWide6)) return best;
+            }
+            await worker.setParameters({
+              tessedit_pageseg_mode: '11',
+              tessedit_char_whitelist: DATE_WHITELIST
+            });
+            if (!isAborted()) {
+              const resWideLocal = await worker.recognize(enhanceLocalGlareAndLcdCanvas(wideScaleRoi, 12));
+              if (recordHit(resWideLocal)) return best;
+            }
+          }
+        }
+
+        // 1H: Dự phòng toàn mặt tem (cho ảnh chụp tem cân đặc thù in NSX/HSD phía TRÊN mã vạch!)
+        if (allowTiltedFallback && (!best.nsx || !best.hsd) && !isAborted()) {
+          const wholeLabelRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, activeDeg, {
+            uMin: -1.06,
+            uSpan: 2.12,
+            vMin: -1.02,
+            vSpan: 2.50,
+            targetBw: 360,
+            minScale: 0.95
+          });
+          if (wholeLabelRoi) {
+            await worker.setParameters({
+              tessedit_pageseg_mode: '11',
+              tessedit_char_whitelist: DATE_WHITELIST
+            });
+            if (!isAborted()) {
+              const resWhole = await worker.recognize(enhanceSoftGrayscaleCanvas(wholeLabelRoi, 12));
+              if (recordHit(resWhole)) return best;
+            }
           }
         }
       }
 
-      if (bottomZoneHasInk && deepRoi && !isAborted()) {
-        await worker.setParameters({
-          tessedit_pageseg_mode: '6',
-          tessedit_char_whitelist: DATE_WHITELIST
-        });
-        const resDeepSoft = await worker.recognize(enhanceSoftGrayscaleCanvas(deepRoi));
-        if (recordHit(resDeepSoft)) return best;
-      }
-      if (bottomZoneHasInk && (deepRoi || rawRoi) && !isAborted()) {
-        const resLcd = await worker.recognize(descreenLcdCanvas(deepRoi || rawRoi));
-        if (recordHit(resLcd)) return best;
-      }
-
-      // 1F: Mở rộng toàn chiều ngang tem cân kho/siêu thị (cho loại tem in NSX bên trái — HSD bên phải sang tận mép phải u=+0.9*bw hoặc năm 2 số!)
-      if (bottomZoneHasInk && !isAborted()) {
-        const wideScaleRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
-          uMin: -1.04,
-          uSpan: 2.08,
-          vMin: 0.36,
-          vSpan: 1.24,
-          targetBw: 420,
-          minScale: 1.0
-        });
-        if (wideScaleRoi) {
-          await worker.setParameters({
-            tessedit_pageseg_mode: '6',
-            tessedit_char_whitelist: DATE_WHITELIST
-          });
-          if (!isAborted()) {
-            const resWide6 = await worker.recognize(enhanceSoftGrayscaleCanvas(wideScaleRoi));
-            if (recordHit(resWide6)) return best;
-          }
-          await worker.setParameters({
-            tessedit_pageseg_mode: '11',
-            tessedit_char_whitelist: DATE_WHITELIST
-          });
-          if (!isAborted()) {
-            const resWideFlat = await worker.recognize(flattenIlluminationToCanvas(wideScaleRoi));
-            if (recordHit(resWideFlat)) return best;
-          }
-        }
-      }
-
-      // 1G: Dự phòng toàn mặt tem (cho ảnh chụp tem cân đặc thù in NSX/HSD phía TRÊN mã vạch!)
-      if (allowTiltedFallback && (!best.nsx || !best.hsd) && !isAborted()) {
-        const wholeLabelRoi = buildRawBarcodeGuidedCropCanvas(fullCanvas, barcodePos, 0, {
-          uMin: -1.06,
-          uSpan: 2.12,
-          vMin: -1.02,
-          vSpan: 2.50,
-          targetBw: 380,
-          minScale: 0.95
-        });
-        if (wholeLabelRoi) {
-          await worker.setParameters({
-            tessedit_pageseg_mode: '11',
-            tessedit_char_whitelist: DATE_WHITELIST
-          });
-          if (!isAborted()) {
-            const resWhole = await worker.recognize(enhanceSoftGrayscaleCanvas(wholeLabelRoi));
-            if (recordHit(resWhole)) return best;
-          }
-        }
-      }
-
-      // Nếu đã tìm đủ hoặc vùng dưới hoàn toàn trống trơn (tem rách cụt phần dưới) thì trả về ngay;
-      // Ngược lại nếu tọa độ mã vạch trên một số dòng điện thoại bị lệch tỷ lệ khung hình -> rơi tiếp xuống quét trực tiếp góc trái dưới!
-      if ((best.nsx && best.hsd) || !bottomZoneHasInk || isAborted()) {
+      if ((best.nsx && best.hsd && !best.suspectYearGap) || !bottomZoneHasInk || isAborted()) {
         return best;
       }
     }
@@ -1803,15 +1939,16 @@
     if ((!best.nsx || !best.hsd || best.suspectYearGap) && !isAborted()) {
       const botLeftCrop = cropBottomLeftDateZoneFromCanvas(fullCanvas);
       if (botLeftCrop && canvasHasTextContrast(botLeftCrop)) {
-        const softBL = enhanceSoftGrayscaleCanvas(botLeftCrop);
+        const localBL = enhanceLocalGlareAndLcdCanvas(botLeftCrop, 12);
         await worker.setParameters({
           tessedit_pageseg_mode: '11',
           tessedit_char_whitelist: DATE_WHITELIST
         });
         if (!isAborted()) {
-          const resBL11 = await worker.recognize(softBL);
+          const resBL11 = await worker.recognize(localBL);
           if (recordHit(resBL11)) return best;
         }
+        const softBL = enhanceSoftGrayscaleCanvas(botLeftCrop, 12);
         await worker.setParameters({
           tessedit_pageseg_mode: '6',
           tessedit_char_whitelist: DATE_WHITELIST
@@ -1824,7 +1961,7 @@
     }
 
     if (rescueAimCropCanvas && !isAborted()) {
-      const softAim = enhanceSoftGrayscaleCanvas(rescueAimCropCanvas);
+      const softAim = enhanceSoftGrayscaleCanvas(rescueAimCropCanvas, 12);
       await worker.setParameters({
         tessedit_pageseg_mode: '6',
         tessedit_char_whitelist: ''
@@ -1837,7 +1974,7 @@
           tessedit_pageseg_mode: '11',
           tessedit_char_whitelist: DATE_WHITELIST
         });
-        const resAim11 = await worker.recognize(softAim);
+        const resAim11 = await worker.recognize(enhanceLocalGlareAndLcdCanvas(rescueAimCropCanvas, 12));
         if (recordHit(resAim11)) return best;
       }
       if (!isAborted()) {
@@ -1845,7 +1982,7 @@
           tessedit_pageseg_mode: '6',
           tessedit_char_whitelist: ''
         });
-        const resAimSharp = await worker.recognize(sharpenDefocusedTextCanvas(rescueAimCropCanvas));
+        const resAimSharp = await worker.recognize(sharpenDefocusedTextCanvas(rescueAimCropCanvas, 12));
         if (recordHit(resAimSharp)) return best;
       }
     }
@@ -1902,7 +2039,7 @@
         settled = true;
         clearTimeout(outerSafetyTimer);
         if (itemTimer) clearTimeout(itemTimer);
-        resolve(val || cancelState.partial || { nsx: '', hsd: '' });
+        resolve(finalizeSafeDatePair(val || cancelState.partial || { nsx: '', hsd: '' }));
       };
 
       const outerSafetyTimer = setTimeout(function () {
@@ -2171,23 +2308,29 @@
 
         const rescueCrop = (!posUse) ? (ctx.rescueAimCropCanvas || cropCenterAimFromCanvas(item.canvas)) : null;
         const allowFullTilt = posUse ? Boolean(ctx.allowTilt && !ctx.liveVideo) : Boolean(ctx.ignoreBarcodeMismatch && ctx.allowTilt);
-        const budgetMs = posUse ? (ctx.liveVideo ? 1750 : 3800) : (ctx.ignoreBarcodeMismatch ? 3800 : 2200);
+        const budgetMs = posUse ? (ctx.liveVideo ? 2350 : 3800) : (ctx.ignoreBarcodeMismatch ? 3800 : 2200);
         const dRes = await extractNsxHsdWithTimeout(item.canvas, posUse, budgetMs, allowFullTilt, rescueCrop);
         collected = mergeDatePair(collected, dRes);
         if (collected.nsx && collected.hsd && !collected.suspectYearGap) break;
       }
 
       // Nếu khung đầu bị rung tay hoặc ống kính điện thoại đang lấy nét lúc bấm chụp mà Camera vẫn đang mở:
-      // - Nếu người dùng đã hạ máy xuống bàn phím/mặt bàn (không còn mặt giấy tem trắng trong khung ~0.25s) -> ngắt ngay tức khắc, KHÔNG BAO GIỜ treo "⏳ Đang đọc..."!
-      // - Nếu người dùng vẫn đang soi vào mặt giấy tem trắng (kể cả túi thịt cong phồng hoặc đưa sát vào góc trái dưới NSX/HSD) -> đọc bồi sắc nét cho tới khi đủ NSX & HSD!
+      // - Chỉ chụp bồi tối đa 2 khung ổn định nét (~0.12s - 0.21s), và ngắt tức thì nếu người dùng đã quét sang túi mới hoặc hạ máy xuống bàn phím!
       if ((!collected.nsx || !collected.hsd) && ctx.liveVideo) {
-        const followDelays = ctx.ignoreBarcodeMismatch ? [120, 220] : [115, 175, 225, 260, 300];
+        const followDelays = ctx.ignoreBarcodeMismatch ? [120, 210] : [125, 215];
         let consecutiveOffLabel = 0;
         let closeUpPaperTries = 0;
         for (let f = 0; f < followDelays.length; f++) {
           if (!readingDateRecordIds[recordId]) break;
+          if (!ctx.ignoreBarcodeMismatch && records.length > 0 && records[records.length - 1].id !== recordId) {
+            // Người dùng đã quét tiếp túi hàng mới -> dừng ngay khung bồi của túi cũ để ưu tiên 100% tốc độ cho túi mới!
+            break;
+          }
           await new Promise(function (r) { setTimeout(r, followDelays[f]); });
           if (!cameraActive || !mediaStream || !ctx.liveVideo || ctx.liveVideo.readyState < 2 || ctx.liveVideo.videoWidth <= 0) {
+            break;
+          }
+          if (!ctx.ignoreBarcodeMismatch && records.length > 0 && records[records.length - 1].id !== recordId) {
             break;
           }
           const nextCanvas = captureCleanFullVideoCanvas(ctx.liveVideo);
@@ -2199,14 +2342,13 @@
               break;
             }
             if (!nextDet || !nextDet.pos) {
-              // Nếu vẫn thấy rõ nền giấy trắng có chữ của tem (người dùng đang soi cận cảnh góc trái dưới NSX/HSD hoặc bao bì cong) -> đọc trực tiếp góc trái dưới tối đa 2 nhịp!
-              if (closeUpPaperTries < 2 && hasWhiteLabelPaperInFrame(nextCanvas)) {
+              if (closeUpPaperTries < 1 && hasWhiteLabelPaperInFrame(nextCanvas)) {
                 closeUpPaperTries += 1;
                 consecutiveOffLabel = 0;
                 const directDates = await extractNsxHsdWithTimeout(
                   nextCanvas,
                   null,
-                  1800,
+                  1500,
                   false,
                   cropCenterAimFromCanvas(nextCanvas)
                 );
@@ -2215,19 +2357,19 @@
                 continue;
               }
               consecutiveOffLabel += 1;
-              if (consecutiveOffLabel >= 2) {
+              if (consecutiveOffLabel >= 1) {
                 // Đã hạ điện thoại khỏi mặt tem (VD: quay vào bàn phím máy tính / mặt bàn) -> dừng hẳn ngay lập tức!
                 break;
               }
               continue;
             }
             consecutiveOffLabel = 0;
-            const nextDates = await extractNsxHsdWithTimeout(nextCanvas, nextDet.pos, 2500, false, null);
+            const nextDates = await extractNsxHsdWithTimeout(nextCanvas, nextDet.pos, 2200, false, null);
             collected = mergeDatePair(collected, nextDates);
           } else {
             const rescueNextPos = nextDet ? nextDet.pos : null;
             const rescueNextCrop = rescueNextPos ? null : cropCenterAimFromCanvas(nextCanvas);
-            const nextDates = await extractNsxHsdWithTimeout(nextCanvas, rescueNextPos, 3200, true, rescueNextCrop);
+            const nextDates = await extractNsxHsdWithTimeout(nextCanvas, rescueNextPos, 2800, true, rescueNextCrop);
             collected = mergeDatePair(collected, nextDates);
           }
           if (collected.nsx && collected.hsd && !collected.suspectYearGap) break;
@@ -2393,11 +2535,47 @@
   }
 
   // =========================================================================
-  // CẦU DAO TỰ NGẮT KCS
+  // CẦU DAO TỰ NGẮT KCS & TỔNG HỢP 3 CHIỀU (THEO SKU × DATE | THEO SKU | THEO DATE)
   // =========================================================================
+  function parseDateVNForSort(rawStr) {
+    const clean = normalizeDateVN(rawStr);
+    if (!clean) return { ok: false, utc: Number.MAX_SAFE_INTEGER, display: '—' };
+    const p = clean.split('/');
+    const d = parseInt(p[0], 10);
+    const m = parseInt(p[1], 10);
+    const y = parseInt(p[2], 10);
+    return {
+      ok: true,
+      utc: Date.UTC(y, m - 1, d),
+      display: clean
+    };
+  }
+
+  function evaluateShelfLifeApp(hsdStr) {
+    const p = parseDateVNForSort(hsdStr);
+    // Nguyên tắc Fail-Closed: Thiếu ngày thì trả về '—', tuyệt đối không tự đoán!
+    if (!p.ok) return { text: '—', cls: 'unknown' };
+    const now = new Date();
+    const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+    const diffDays = Math.round((p.utc - todayUtc) / 86400000);
+    if (diffDays < 0) {
+      return { text: 'Quá hạn ' + Math.abs(diffDays) + ' ngày', cls: 'expired' };
+    }
+    if (diffDays === 0) {
+      return { text: 'Hết hạn hôm nay', cls: 'near' };
+    }
+    if (diffDays <= 2) {
+      return { text: 'Còn ' + diffDays + ' ngày (Cận date)', cls: 'near' };
+    }
+    return { text: 'Còn ' + diffDays + ' ngày', cls: 'ok' };
+  }
+
   function computeMetrics() {
     let totalGrams = 0;
     const byCode = {};
+    const bySkuDate = {};
+    const byDate = {};
+    const knownDateKeys = {};
 
     for (let i = 0; i < records.length; i++) {
       const r = records[i];
@@ -2405,34 +2583,125 @@
       totalGrams += g;
 
       const code = String(r.productCode || '').trim() || 'CHUA_RO';
+      const pNsx = parseDateVNForSort(r.nsx);
+      const pHsd = parseDateVNForSort(r.hsd);
+      const nsxDisp = pNsx.ok ? pNsx.display : '—';
+      const hsdDisp = pHsd.ok ? pHsd.display : '—';
+      const hasDate = Boolean(pNsx.ok || pHsd.ok);
+      const datePairKey = hsdDisp + '|' + nsxDisp;
+      const skuDateKey = code + '|' + datePairKey;
+      if (hasDate) knownDateKeys[datePairKey] = true;
+
+      // 1. Theo SKU (Mã sản phẩm)
       if (!byCode[code]) {
         byCode[code] = {
           code: code,
           name: r.productName ? r.productName : null,
           count: 0,
           grams: 0,
-          lots: {}
+          lots: {},
+          dateMap: {}
         };
       }
       if (!byCode[code].name && r.productName) {
         byCode[code].name = r.productName;
       }
-      if (r.nsx || r.hsd) {
-        const lotKey = formatLotDateDisplay(r.nsx) + ' → ' + formatLotDateDisplay(r.hsd);
+      if (hasDate) {
+        const lotKey = nsxDisp + ' → ' + hsdDisp;
         byCode[code].lots[lotKey] = true;
       }
+      if (!byCode[code].dateMap[datePairKey]) {
+        byCode[code].dateMap[datePairKey] = {
+          nsx: nsxDisp,
+          hsd: hsdDisp,
+          hsdUtc: pHsd.utc,
+          nsxUtc: pNsx.utc,
+          hasDate: hasDate,
+          count: 0,
+          grams: 0
+        };
+      }
+      byCode[code].dateMap[datePairKey].count += 1;
+      byCode[code].dateMap[datePairKey].grams += g;
       byCode[code].count += 1;
       byCode[code].grams += g;
+
+      // 2. Theo SKU × Date (NSX / HSD)
+      if (!bySkuDate[skuDateKey]) {
+        bySkuDate[skuDateKey] = {
+          code: code,
+          name: r.productName ? r.productName : null,
+          nsx: nsxDisp,
+          hsd: hsdDisp,
+          nsxUtc: pNsx.utc,
+          hsdUtc: pHsd.utc,
+          hasDate: hasDate,
+          count: 0,
+          grams: 0
+        };
+      }
+      if (!bySkuDate[skuDateKey].name && r.productName) {
+        bySkuDate[skuDateKey].name = r.productName;
+      }
+      bySkuDate[skuDateKey].count += 1;
+      bySkuDate[skuDateKey].grams += g;
+
+      // 3. Theo Date (HSD / NSX)
+      if (!byDate[datePairKey]) {
+        byDate[datePairKey] = {
+          nsx: nsxDisp,
+          hsd: hsdDisp,
+          nsxUtc: pNsx.utc,
+          hsdUtc: pHsd.utc,
+          hasDate: hasDate,
+          count: 0,
+          grams: 0,
+          skuMap: {}
+        };
+      }
+      byDate[datePairKey].count += 1;
+      byDate[datePairKey].grams += g;
+      if (!byDate[datePairKey].skuMap[code]) {
+        byDate[datePairKey].skuMap[code] = {
+          code: code,
+          name: r.productName ? r.productName : null,
+          count: 0,
+          grams: 0
+        };
+      }
+      if (!byDate[datePairKey].skuMap[code].name && r.productName) {
+        byDate[datePairKey].skuMap[code].name = r.productName;
+      }
+      byDate[datePairKey].skuMap[code].count += 1;
+      byDate[datePairKey].skuMap[code].grams += g;
     }
 
     const productGroups = Object.keys(byCode).map(function (k) { return byCode[k]; });
     productGroups.sort(function (a, b) { return b.grams - a.grams; });
 
+    const skuDateGroups = Object.keys(bySkuDate).map(function (k) { return bySkuDate[k]; });
+    skuDateGroups.sort(function (a, b) {
+      if (a.code !== b.code) return String(a.code).localeCompare(String(b.code));
+      if (a.hsdUtc !== b.hsdUtc) return a.hsdUtc - b.hsdUtc;
+      return a.nsxUtc - b.nsxUtc;
+    });
+
+    const dateGroups = Object.keys(byDate).map(function (k) { return byDate[k]; });
+    dateGroups.sort(function (a, b) {
+      if (a.hasDate !== b.hasDate) return a.hasDate ? -1 : 1;
+      if (a.hsdUtc !== b.hsdUtc) return a.hsdUtc - b.hsdUtc;
+      if (a.nsxUtc !== b.nsxUtc) return a.nsxUtc - b.nsxUtc;
+      return b.grams - a.grams;
+    });
+
     return {
       totalScans: records.length,
       totalProducts: productGroups.length,
+      totalDateLots: Object.keys(knownDateKeys).length,
       totalGrams: totalGrams,
-      productGroups: productGroups
+      productGroups: productGroups,
+      skuDateGroups: skuDateGroups,
+      dateGroups: dateGroups
     };
   }
 
@@ -2447,11 +2716,21 @@
         return { ok: false, error: 'Phát hiện số ký không hợp lệ ở mã ' + m.productGroups[i].code };
       }
     }
-    if (sumGroupCount !== m.totalScans) {
-      return { ok: false, error: 'Lệch tổng số tem đối chiếu (' + sumGroupCount + ' != ' + m.totalScans + ')' };
+    let sumSdCount = 0, sumSdGrams = 0;
+    for (let i = 0; i < m.skuDateGroups.length; i++) {
+      sumSdCount += m.skuDateGroups[i].count;
+      sumSdGrams += m.skuDateGroups[i].grams;
     }
-    if (sumGroupGrams !== m.totalGrams) {
-      return { ok: false, error: 'Lệch tổng số ký đối chiếu (' + sumGroupGrams + ' != ' + m.totalGrams + ')' };
+    let sumDtCount = 0, sumDtGrams = 0;
+    for (let i = 0; i < m.dateGroups.length; i++) {
+      sumDtCount += m.dateGroups[i].count;
+      sumDtGrams += m.dateGroups[i].grams;
+    }
+    if (sumGroupCount !== m.totalScans || sumSdCount !== m.totalScans || sumDtCount !== m.totalScans) {
+      return { ok: false, error: 'Lệch tổng số tem đối chiếu 3 chiều (' + sumGroupCount + '/' + sumSdCount + '/' + sumDtCount + ' != ' + m.totalScans + ')' };
+    }
+    if (sumGroupGrams !== m.totalGrams || sumSdGrams !== m.totalGrams || sumDtGrams !== m.totalGrams) {
+      return { ok: false, error: 'Lệch tổng số ký đối chiếu 3 chiều (' + sumGroupGrams + '/' + sumSdGrams + '/' + sumDtGrams + ' != ' + m.totalGrams + ')' };
     }
     return { ok: true, metrics: m };
   }
@@ -2640,7 +2919,121 @@
   }
 
   function renderSummaryTab(m) {
+    const thead = document.getElementById('summaryTableHead');
     const tbody = document.getElementById('summaryTableBody');
+    document.querySelectorAll('.summary-dim-btn').forEach(function (b) {
+      b.classList.toggle('active', b.dataset.dim === currentSummaryDim);
+    });
+
+    if (currentSummaryDim === 'sku_date') {
+      if (thead) {
+        thead.innerHTML = (
+          '<tr>' +
+            '<th>Mã SKU</th>' +
+            '<th>Tên SP &amp; Hạn dùng</th>' +
+            '<th>NSX → HSD (Date)</th>' +
+            '<th class="num">Số tem</th>' +
+            '<th class="num">Số ký (Kg)</th>' +
+          '</tr>'
+        );
+      }
+      if (!m.skuDateGroups || m.skuDateGroups.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#64748b;padding:18px;">Chưa có dữ liệu tổng hợp theo SKU × Date.</td></tr>';
+        return;
+      }
+      let html = '';
+      for (let i = 0; i < m.skuDateGroups.length; i++) {
+        const sd = m.skuDateGroups[i];
+        const dispName = sd.name ? escapeHtml(sd.name) : '<span style="color:#b45309;">— (Chưa đặt tên)</span>';
+        const st = evaluateShelfLifeApp(sd.hsd);
+        const stPill = '<div class="shelf-pill ' + st.cls + '">' + escapeHtml(st.text) + '</div>';
+        const dateDisp = (sd.nsx !== '—' || sd.hsd !== '—')
+          ? ('<div style="font-size:12px;font-weight:800;color:#0f2942;">HSD: ' + escapeHtml(sd.hsd) + '</div>' +
+             '<div style="font-size:11px;color:#475569;">NSX: ' + escapeHtml(sd.nsx) + '</div>')
+          : '<span style="color:#64748b;font-weight:700;">—</span>';
+        html += (
+          '<tr>' +
+            '<td><span class="code-chip">' + escapeHtml(sd.code) + '</span></td>' +
+            '<td style="font-weight:700;">' + dispName + stPill + '</td>' +
+            '<td>' + dateDisp + '</td>' +
+            '<td class="num">' + formatInt(sd.count) + '</td>' +
+            '<td class="num" style="color:#15803d;">' + formatKg(sd.grams) + '</td>' +
+          '</tr>'
+        );
+      }
+      html += (
+        '<tr style="background:#f0fdf4;font-weight:900;">' +
+          '<td colspan="3">TỔNG CỘNG (' + formatInt(m.skuDateGroups.length) + ' dòng SKU × Date)</td>' +
+          '<td class="num">' + formatInt(m.totalScans) + '</td>' +
+          '<td class="num" style="color:#15803d;">' + formatKg(m.totalGrams) + '</td>' +
+        '</tr>'
+      );
+      tbody.innerHTML = html;
+      return;
+    }
+
+    if (currentSummaryDim === 'date') {
+      if (thead) {
+        thead.innerHTML = (
+          '<tr>' +
+            '<th>HSD (Date) &amp; NSX</th>' +
+            '<th>Tình trạng &amp; Các SKU thuộc Date</th>' +
+            '<th class="num">Số tem</th>' +
+            '<th class="num">Số ký (Kg)</th>' +
+          '</tr>'
+        );
+      }
+      if (!m.dateGroups || m.dateGroups.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#64748b;padding:18px;">Chưa có dữ liệu tổng hợp theo Date.</td></tr>';
+        return;
+      }
+      let html = '';
+      for (let i = 0; i < m.dateGroups.length; i++) {
+        const dg = m.dateGroups[i];
+        const st = dg.hasDate
+          ? evaluateShelfLifeApp(dg.hsd)
+          : { text: '— (Chưa ghi nhận NSX/HSD)', cls: 'unknown' };
+        const sList = Object.keys(dg.skuMap).map(function (k) { return dg.skuMap[k]; });
+        sList.sort(function (a, b) { return b.grams - a.grams; });
+        const skuLines = sList.map(function (s) {
+          return escapeHtml(s.code + ' - ' + (s.name || '—') + ' (' + s.count + ' tem • ' + formatKg(s.grams) + ' Kg)');
+        }).join('<br>');
+        const dateCell = dg.hasDate
+          ? ('<div style="font-weight:900;color:#0f2942;">HSD: ' + escapeHtml(dg.hsd) + '</div>' +
+             '<div style="font-size:11.5px;color:#475569;">NSX: ' + escapeHtml(dg.nsx) + '</div>')
+          : '<span style="font-weight:800;color:#64748b;">— (Chưa rõ Date)</span>';
+        html += (
+          '<tr>' +
+            '<td>' + dateCell + '</td>' +
+            '<td><span class="shelf-pill ' + st.cls + '">' + escapeHtml(st.text) + '</span>' +
+              '<div style="font-size:11.5px;color:#334155;font-weight:600;margin-top:4px;line-height:1.4;">' + skuLines + '</div></td>' +
+            '<td class="num">' + formatInt(dg.count) + '</td>' +
+            '<td class="num" style="color:#15803d;">' + formatKg(dg.grams) + '</td>' +
+          '</tr>'
+        );
+      }
+      html += (
+        '<tr style="background:#f0fdf4;font-weight:900;">' +
+          '<td colspan="2">TỔNG CỘNG (' + formatInt(m.dateGroups.length) + ' nhóm Date)</td>' +
+          '<td class="num">' + formatInt(m.totalScans) + '</td>' +
+          '<td class="num" style="color:#15803d;">' + formatKg(m.totalGrams) + '</td>' +
+        '</tr>'
+      );
+      tbody.innerHTML = html;
+      return;
+    }
+
+    // Chế độ gộp theo SKU ('sku')
+    if (thead) {
+      thead.innerHTML = (
+        '<tr>' +
+          '<th>Mã SKU</th>' +
+          '<th>Tên sản phẩm &amp; Chi tiết Date</th>' +
+          '<th class="num">Số tem</th>' +
+          '<th class="num">Số ký (Kg)</th>' +
+        '</tr>'
+      );
+    }
     if (m.productGroups.length === 0) {
       tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#64748b;padding:18px;">Chưa có dữ liệu tổng hợp.</td></tr>';
       return;
@@ -2649,9 +3042,18 @@
     for (let i = 0; i < m.productGroups.length; i++) {
       const g = m.productGroups[i];
       const dispName = g.name ? escapeHtml(g.name) : '<span style="color:#b45309;">— (Chưa đặt tên)</span>';
-      const lotKeys = Object.keys(g.lots || {});
-      const lotSub = lotKeys.length > 0
-        ? ('<div style="font-size:11.5px;color:#0369a1;font-weight:600;margin-top:2px;">📅 ' + escapeHtml(lotKeys.join('; ')) + '</div>')
+      const dItems = Object.keys(g.dateMap || {}).map(function (k) { return g.dateMap[k]; });
+      dItems.sort(function (a, b) {
+        if (a.hasDate !== b.hasDate) return a.hasDate ? -1 : 1;
+        return a.hsdUtc - b.hsdUtc;
+      });
+      const lotParts = dItems.map(function (di) {
+        return di.hasDate
+          ? ('HSD ' + di.hsd + ' (NSX ' + di.nsx + '): ' + di.count + ' tem • ' + formatKg(di.grams) + ' Kg')
+          : ('Chưa rõ date (—): ' + di.count + ' tem • ' + formatKg(di.grams) + ' Kg');
+      });
+      const lotSub = lotParts.length > 0
+        ? ('<div style="font-size:11.5px;color:#0369a1;font-weight:600;margin-top:3px;line-height:1.4;">📅 ' + lotParts.map(escapeHtml).join('<br>📅 ') + '</div>')
         : '';
       html += (
         '<tr>' +
@@ -2664,7 +3066,7 @@
     }
     html += (
       '<tr style="background:#f0fdf4;font-weight:900;">' +
-        '<td colspan="2">TỔNG CỘNG (' + formatInt(m.totalProducts) + ' sản phẩm)</td>' +
+        '<td colspan="2">TỔNG CỘNG (' + formatInt(m.totalProducts) + ' mã SKU)</td>' +
         '<td class="num">' + formatInt(m.totalScans) + '</td>' +
         '<td class="num" style="color:#15803d;">' + formatKg(m.totalGrams) + '</td>' +
       '</tr>'
@@ -3030,8 +3432,8 @@
       iconEl.textContent = '📸';
       textEl.textContent = 'QUÉT';
       statusEl.textContent = settings.autoSnapCamera
-        ? '⚡ Tự chốt v14 đang BẬT: Giữ trọn tem (cả góc trái dưới NSX/HSD) trong khung!'
-        : '👆 Bản v14: Đưa trọn tem (cả góc trái dưới NSX/HSD) vào khung → Bấm nút tròn chốt!';
+        ? '⚡ Tự chốt v15 đang BẬT: Giữ trọn tem (cả góc trái dưới NSX/HSD) trong khung!'
+        : '👆 Bản v15: Đưa trọn tem (cả góc trái dưới NSX/HSD) vào khung → Bấm nút tròn chốt!';
     }
   }
 
@@ -3595,6 +3997,12 @@
     async function step() {
       if (!cameraActive || !mediaStream || radarLoopId !== myLoopId) return;
 
+      // Nhường trọn 100% sức mạnh chip điện thoại cho bộ đọc chữ NSX/HSD khi vừa chốt tem (giúp tốc độ đọc ngày trên ĐT nhanh gấp 3 lần!)
+      if (activeDateReadsCount > 0) {
+        setTimeout(step, 280);
+        return;
+      }
+
       if (!singleScanActive && video && video.readyState >= 2 && video.videoWidth > 0) {
         tick += 1;
         const vw = video.videoWidth;
@@ -3633,7 +4041,9 @@
           const vis = getVisibleAimRectInVideo(video, 0.08);
           const scaleX = fw / Math.max(1, vw);
           const scaleY = fh / Math.max(1, vh);
-          const alreadyLockedFresh = Boolean(livePreLock && (Date.now() - livePreLock.lockedAt) < 420);
+          const alreadyLockedFresh = Boolean(
+            autoSnapStreakCount >= 1 || (livePreLock && (Date.now() - livePreLock.lockedAt) < 520)
+          );
           const modeIdx = alreadyLockedFresh ? (tick % 2) : (tick % 5);
           let rx = Math.round(vis.sx * scaleX);
           let ry = Math.round(vis.sy * scaleY);
@@ -4505,23 +4915,23 @@
       const workCanvas = document.createElement('canvas');
       const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
 
-      // 15 lượt quét độ phân giải gốc (từ nhanh 15ms tới chuyên sâu cho ảnh chụp xa 12MP, kho lạnh tối, sát mép, nghiêng mọi góc)
+      // 15 lượt quét độ phân giải tối ưu (ưu tiên mặt phẳng + nghiêng ±14° toàn khung ngay lượt đầu để ảnh nghiêng/kho lạnh tối chốt mã dưới 0.25s!)
       const passes = [
-        { cw: 1.0, ch: 1.0, ox: 0, oy: 0, deg: 0, maxDim: 2050, pad: 24, sharp: false, nat: true },
-        { cw: 1.0, ch: 1.0, ox: 0, oy: 0, deg: 0, maxDim: 2050, pad: 28, sharp: true, nat: false },
-        { cw: 0.54, ch: 0.54, ox: 0, oy: 0, deg: 0, maxDim: 1950, pad: 24, sharp: true, nat: true },
-        { cw: 0.56, ch: 0.56, ox: 0, oy: 0, deg: -11, maxDim: 1850, pad: 24, sharp: true, nat: false },
-        { cw: 0.56, ch: 0.56, ox: 0, oy: 0, deg: 11, maxDim: 1850, pad: 24, sharp: true, nat: false },
-        { cw: 0.34, ch: 0.34, ox: 0, oy: 0, deg: 0, maxDim: 1800, pad: 24, sharp: true, nat: false },
-        { cw: 0.74, ch: 0.52, ox: 0, oy: -0.16, deg: 0, maxDim: 1850, pad: 24, sharp: true, nat: false },
-        { cw: 0.74, ch: 0.52, ox: 0, oy: 0.16, deg: 0, maxDim: 1850, pad: 24, sharp: true, nat: false },
-        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: -10, maxDim: 1900, pad: 26, sharp: true, nat: false },
-        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: 10, maxDim: 1900, pad: 26, sharp: true, nat: false },
-        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: -19, maxDim: 1900, pad: 26, sharp: true, nat: false },
-        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: 19, maxDim: 1900, pad: 26, sharp: true, nat: false },
-        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: -33, maxDim: 1850, pad: 26, sharp: true, nat: false },
-        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: 33, maxDim: 1850, pad: 26, sharp: true, nat: false },
-        { cw: 0.98, ch: 0.98, ox: 0, oy: 0, deg: 90, maxDim: 1900, pad: 26, sharp: true, nat: false }
+        { cw: 1.0, ch: 1.0, ox: 0, oy: 0, deg: 0, maxDim: 1750, pad: 22, sharp: false, nat: true },
+        { cw: 1.0, ch: 1.0, ox: 0, oy: 0, deg: 0, maxDim: 1750, pad: 24, sharp: true, nat: false },
+        { cw: 0.54, ch: 0.54, ox: 0, oy: 0, deg: 0, maxDim: 1750, pad: 22, sharp: true, nat: true },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: -14, maxDim: 1650, pad: 24, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: 14, maxDim: 1650, pad: 24, sharp: true, nat: false },
+        { cw: 0.56, ch: 0.56, ox: 0, oy: 0, deg: -11, maxDim: 1700, pad: 22, sharp: true, nat: false },
+        { cw: 0.56, ch: 0.56, ox: 0, oy: 0, deg: 11, maxDim: 1700, pad: 22, sharp: true, nat: false },
+        { cw: 0.34, ch: 0.34, ox: 0, oy: 0, deg: 0, maxDim: 1650, pad: 22, sharp: true, nat: false },
+        { cw: 0.74, ch: 0.52, ox: 0, oy: -0.16, deg: 0, maxDim: 1700, pad: 22, sharp: true, nat: false },
+        { cw: 0.74, ch: 0.52, ox: 0, oy: 0.16, deg: 0, maxDim: 1700, pad: 22, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: -24, maxDim: 1650, pad: 24, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: 24, maxDim: 1650, pad: 24, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: -35, maxDim: 1650, pad: 24, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, ox: 0, oy: 0, deg: 35, maxDim: 1650, pad: 24, sharp: true, nat: false },
+        { cw: 0.98, ch: 0.98, ox: 0, oy: 0, deg: 90, maxDim: 1700, pad: 24, sharp: true, nat: false }
       ];
 
       const hasWasmEngine = Boolean(window.ZXingWASM && window.ZXingWASM.readBarcodesFromImageData);
@@ -4984,6 +5394,53 @@
       ].map(csvEscape).join(','));
     }
 
+    const m = computeMetrics();
+    lines.push('');
+    lines.push(['I. TỔNG HỢP TỒN THEO MÃ SKU × THEO DATE (NSX / HSD)'].map(csvEscape).join(','));
+    lines.push(['STT', 'Mã SKU', 'Tên sản phẩm', 'NSX', 'HSD (Date)', 'Tình trạng hạn dùng', 'Số tem', 'Tổng số ký (Kg)'].map(csvEscape).join(','));
+    for (let i = 0; i < m.skuDateGroups.length; i++) {
+      const sd = m.skuDateGroups[i];
+      lines.push([
+        String(i + 1),
+        '="' + sd.code + '"',
+        sd.name || '—',
+        sd.nsx,
+        sd.hsd,
+        evaluateShelfLifeApp(sd.hsd).text,
+        String(sd.count),
+        (sd.grams / 1000).toFixed(3)
+      ].map(csvEscape).join(','));
+    }
+
+    lines.push('');
+    lines.push(['II. TỔNG HỢP TỒN GỘP THEO MÃ SKU'].map(csvEscape).join(','));
+    lines.push(['STT', 'Mã SKU', 'Tên sản phẩm', 'Số tem', 'Tổng số ký (Kg)'].map(csvEscape).join(','));
+    for (let i = 0; i < m.productGroups.length; i++) {
+      const pg = m.productGroups[i];
+      lines.push([
+        String(i + 1),
+        '="' + pg.code + '"',
+        pg.name || '—',
+        String(pg.count),
+        (pg.grams / 1000).toFixed(3)
+      ].map(csvEscape).join(','));
+    }
+
+    lines.push('');
+    lines.push(['III. TỔNG HỢP TỒN GỘP THEO DATE (HSD / NSX)'].map(csvEscape).join(','));
+    lines.push(['STT', 'HSD (Date)', 'NSX', 'Tình trạng hạn dùng', 'Số tem', 'Tổng số ký (Kg)'].map(csvEscape).join(','));
+    for (let i = 0; i < m.dateGroups.length; i++) {
+      const dg = m.dateGroups[i];
+      lines.push([
+        String(i + 1),
+        dg.hsd,
+        dg.nsx,
+        dg.hasDate ? evaluateShelfLifeApp(dg.hsd).text : '—',
+        String(dg.count),
+        (dg.grams / 1000).toFixed(3)
+      ].map(csvEscape).join(','));
+    }
+
     const bom = '\uFEFF';
     const blob = new Blob([bom + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -5240,6 +5697,13 @@
     if (btnAutoSnap) {
       btnAutoSnap.addEventListener('click', function () {
         settings.autoSnapCamera = !settings.autoSnapCamera;
+        if (settings.autoSnapCamera) {
+          const latestR = records.length > 0 ? records[records.length - 1] : null;
+          if (!latestR || (latestR.nsx && latestR.hsd)) {
+            lastAutoSnappedCode = '';
+            lastAutoSnappedEpoch = 0;
+          }
+        }
         saveSettings();
         refreshAutoSnapBtnUI();
         if (cameraActive && !singleScanActive) {
@@ -5312,6 +5776,13 @@
 
     document.getElementById('searchHistoryInput').addEventListener('input', renderScanLists);
     document.getElementById('searchCatalogInput').addEventListener('input', renderCatalogTab);
+
+    document.querySelectorAll('.summary-dim-btn').forEach(function (dimBtn) {
+      dimBtn.addEventListener('click', function () {
+        currentSummaryDim = dimBtn.dataset.dim || 'sku_date';
+        renderSummaryTab(computeMetrics());
+      });
+    });
 
     document.getElementById('editCodeInput').addEventListener('input', function (e) {
       const code = String(e.target.value || '').trim();
