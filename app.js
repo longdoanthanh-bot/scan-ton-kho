@@ -42,12 +42,11 @@
     sheetWebAppUrl: DEFAULT_SHEET_WEB_APP_URL,
     sheetViewUrl: DEFAULT_SHEET_VIEW_URL,
     soundEnabled: true,
-    duplicateAskSec: 4,
-    scalePrefixOnly: true,
-    autoSnapCamera: false
+    duplicateAskSec: 0,
+    scalePrefixOnly: true
   };
 
-  let currentMode = 'pda';
+  let currentMode = 'camera';
   let syncInProgress = false;
   let lastScannedCode = '';
   let lastScannedEpoch = 0;
@@ -55,12 +54,14 @@
   let pendingDuplicateDates = null;
   let pendingDuplicateDateCtx = null;
   let dateOnlyTarget = 'latest';
+  let dateOnlyTargetRecordId = null;
+  let rescueTargetRecordId = null;
   let currentSummaryDim = 'sku_date';
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v17';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v18';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
-  // Camera, WASM, Live Pre-Lock Radar, Batch Photo Upload & Async Offline OCR state
+  // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
   let wasmReadyPromise = null;
   let nativeDetectorInitPromise = null;
   let batchProcessingActive = false;
@@ -70,12 +71,14 @@
   let ocrWorkerPromise = null;
   let ocrWorkerResolved = false;
   let ocrQueuePromise = Promise.resolve();
+  let photoSnapQueue = Promise.resolve();
+  let pendingSnapJobsCount = 0;
+  let imageCaptureDevice = null;
   let activeDateReadsCount = 0;
   let readingDateRecordIds = {};
   let readingDateStartedAt = {};
   let nextOpUid = 1;
   let inFlightOpUids = {};
-  let lastLiveAutoRescueAt = 0;
   let syncHoldTimer = null;
   let dateHoldSafetyTimer = null;
   let reconcileInFlight = false;
@@ -87,23 +90,7 @@
   let hardwareZoomSupported = false;
   let nativeDetector = null;
   let singleScanActive = false;
-  let singleScanToken = 0;
   let shutterLockUntil = 0;
-  let livePreLock = null;
-  let radarLoopId = 0;
-  let lastAutoSnappedCode = '';
-  let lastAutoSnappedEpoch = 0;
-  let autoSnapStreakCode = '';
-  let autoSnapStreakCount = 0;
-  let autoSnapStreakLastAt = 0;
-  let edgeClipHoldCode = '';
-  let edgeClipHoldSince = 0;
-
-  // Global PDA hardware laser keystroke buffer
-  let wedgeBuffer = '';
-  let wedgeLastKeyTime = 0;
-  let pdaBurstStartMs = 0;
-  let pdaBurstTimer = null;
   let deferredInstallPrompt = null;
 
   // Audio context & IndexedDB offline vault
@@ -293,11 +280,11 @@
 
   function checkPendingSwReload() {
     if (!pendingSwReload) return;
-    if (singleScanActive || batchProcessingActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) return;
+    if (singleScanActive || pendingSnapJobsCount > 0 || batchProcessingActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) return;
     pendingSwReload = false;
     try {
-      if (sessionStorage.getItem('sw_reloaded_v17') === '1') return;
-      sessionStorage.setItem('sw_reloaded_v17', '1');
+      if (sessionStorage.getItem('sw_reloaded_v18') === '1') return;
+      sessionStorage.setItem('sw_reloaded_v18', '1');
     } catch (e) {}
     window.location.reload();
   }
@@ -308,7 +295,7 @@
       return;
     }
     const hadPreviousController = Boolean(navigator.serviceWorker.controller);
-    navigator.serviceWorker.register('./sw.js?v=17', { updateViaCache: 'none' }).then(function (reg) {
+    navigator.serviceWorker.register('./sw.js?v=18', { updateViaCache: 'none' }).then(function (reg) {
       if (reg.waiting) {
         reg.waiting.postMessage('SKIP_WAITING');
       }
@@ -329,13 +316,13 @@
 
     navigator.serviceWorker.addEventListener('controllerchange', function () {
       if (!hadPreviousController) return;
-      if (singleScanActive || batchProcessingActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) {
+      if (singleScanActive || pendingSnapJobsCount > 0 || batchProcessingActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) {
         pendingSwReload = true;
         return;
       }
       try {
-        if (sessionStorage.getItem('sw_reloaded_v17') === '1') return;
-        sessionStorage.setItem('sw_reloaded_v17', '1');
+        if (sessionStorage.getItem('sw_reloaded_v18') === '1') return;
+        sessionStorage.setItem('sw_reloaded_v18', '1');
       } catch (e) {}
       window.location.reload();
     });
@@ -356,17 +343,10 @@
     await loadRecordsAndOpsWithVaultRecovery();
 
     bindEvents();
-    refreshAutoSnapBtnUI();
     updateOfflineBannerUI();
     refreshSettingsSheetLinkUI();
 
-    if (window.location.hash === '#batch') {
-      applyModeUI('batch');
-    } else if (window.location.hash === '#camera') {
-      applyModeUI('camera');
-    } else {
-      applyModeUI('pda');
-    }
+    startCamera1DScanner();
 
     renderAll();
     registerAndAutoUpdateServiceWorker();
@@ -401,7 +381,7 @@
     // - Có mục Offline chờ -> tự đẩy lên Sheet
     // - Xóa / sửa dòng trực tiếp trên Google Sheet -> App tự cập nhật khớp tức thì!
     setInterval(function () {
-      if (!document.hidden && navigator.onLine && settings.sheetWebAppUrl && !singleScanActive && !batchProcessingActive && activeDateReadsCount === 0) {
+      if (!document.hidden && navigator.onLine && settings.sheetWebAppUrl && !singleScanActive && pendingSnapJobsCount === 0 && !batchProcessingActive && activeDateReadsCount === 0) {
         reconcileWithGoogleSheet(false, false);
       }
     }, 5000);
@@ -421,7 +401,7 @@
       bar.style.display = 'block';
       if (txt) {
         txt.textContent =
-          'Đang không có mạng (Offline) — Bạn cứ quét bình thường! Đã lưu an toàn trên máy (' +
+          'Đang không có mạng (Offline) — Bạn cứ chụp bình thường! Đã lưu an toàn trên máy (' +
           records.length + ' tem' + (pendingOps.length > 0 ? ', chờ tự đẩy ' + pendingOps.length + ' mục khi có mạng' : '') + ').';
       }
     } else {
@@ -442,6 +422,11 @@
       if (raw) {
         const parsed = JSON.parse(raw);
         settings = Object.assign(settings, parsed);
+      }
+      if (!localStorage.getItem('scan_ton_v18_no_ok')) {
+        settings.duplicateAskSec = 0;
+        localStorage.setItem('scan_ton_v18_no_ok', '1');
+        localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(settings));
       }
       if (!settings.sheetWebAppUrl) settings.sheetWebAppUrl = DEFAULT_SHEET_WEB_APP_URL;
       if (!settings.sheetViewUrl) settings.sheetViewUrl = DEFAULT_SHEET_VIEW_URL;
@@ -690,20 +675,7 @@
   }
 
   function getActivePdaLotDates() {
-    const nsxEl = document.getElementById('pdaLotNsxInput');
-    const hsdEl = document.getElementById('pdaLotHsdInput');
-    const nsx = nsxEl ? normalizeDateVN(nsxEl.value) : '';
-    const hsd = hsdEl ? normalizeDateVN(hsdEl.value) : '';
-    return { nsx: nsx, hsd: hsd };
-  }
-
-  function refreshPdaLotClearBtn() {
-    const btn = document.getElementById('btnClearLotDates');
-    const nsxEl = document.getElementById('pdaLotNsxInput');
-    const hsdEl = document.getElementById('pdaLotHsdInput');
-    if (!btn || !nsxEl || !hsdEl) return;
-    const hasVal = (nsxEl.value.trim() !== '' || hsdEl.value.trim() !== '');
-    btn.style.display = hasVal ? 'inline-flex' : 'none';
+    return { nsx: '', hsd: '' };
   }
 
   // =========================================================================
@@ -2869,18 +2841,15 @@
     updateSyncBadge();
   }
 
-  function renderLatestCard(flash, metricsObj) {
-    const m = metricsObj || computeMetrics();
+  function renderLatestCard(flash) {
     const card = document.getElementById('latestScanCard');
     const emptyState = document.getElementById('latestEmptyState');
     const contentState = document.getElementById('latestContentState');
-    const liveHud = document.getElementById('cameraLiveHud');
 
     if (records.length === 0) {
       emptyState.style.display = 'block';
       contentState.style.display = 'none';
       card.classList.remove('flash-ok', 'flash-warn');
-      if (liveHud) liveHud.classList.remove('show');
       return;
     }
 
@@ -2919,37 +2888,8 @@
     const btnScanDates = document.getElementById('btnScanDatesLatest');
     if (btnScanDates) {
       btnScanDates.onclick = function () {
-        rescueDatesForLatestRecord();
+        rescueDatesForRecord(latest.id);
       };
-    }
-
-    if (liveHud) {
-      document.getElementById('hudTopMeta').textContent =
-        '✅ Đã quét • Tổng: ' + formatInt(m.totalScans) + ' tem | ' + formatInt(m.totalProducts) + ' SP | ' + formatKg(m.totalGrams) + ' Kg';
-      document.getElementById('hudProductName').textContent =
-        (latest.productName ? latest.productName : '— Chưa có tên') + ' (' + (latest.productCode || '—') + ')';
-      const hudDatesEl = document.getElementById('hudLotDates');
-      if (hudDatesEl) {
-        hudDatesEl.textContent = 'NSX: ' + dispNsx + ' • HSD: ' + dispHsd;
-        hudDatesEl.style.color = (latest.nsx && latest.hsd) ? '#86efac' : (readingNow ? '#fde047' : '#fca5a5');
-      }
-      document.getElementById('hudWeight').textContent = formatKg(latest.grams) + ' Kg';
-      const btnHudDates = document.getElementById('btnHudScanDates');
-      if (btnHudDates) {
-        const needRescue = (!readingNow && (!latest.nsx || !latest.hsd));
-        btnHudDates.style.display = needRescue ? 'inline-block' : 'none';
-        btnHudDates.onclick = function () {
-          rescueDatesForLatestRecord();
-        };
-      }
-      document.getElementById('btnHudEdit').onclick = function () {
-        openEditModal(latest.id);
-      };
-      if (flash) {
-        liveHud.classList.remove('show');
-        void liveHud.offsetWidth;
-      }
-      liveHud.classList.add('show');
     }
 
     if (flash) {
@@ -3350,7 +3290,7 @@
   }
 
   // =========================================================================
-  // UNIVERSAL CAMERA 1D SCANNER + AUTOMATIC NSX/HSD EXTRACTION
+  // BẢN v18: MÁY ẢNH CHỤP TĨNH 4:3 MỘT CHẠM (NỔI HÌNH LÊN LÀ ĐÃ GHI NHẬN • BỎ QUA NÚT OK)
   // =========================================================================
   async function refreshRearLensList() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return;
@@ -3378,7 +3318,7 @@
   async function cycleRearCameraLens() {
     await refreshRearLensList();
     if (rearVideoDevices.length < 2) {
-      showBanner('warn', 'Điện thoại này chỉ mở 1 ống kính trên trình duyệt — Hãy dùng mục "📚 Loạt ảnh" hoặc bấm "📷 Máy ảnh gốc" để lấy nét cận cảnh tốt nhất!');
+      showBanner('warn', 'Điện thoại này chỉ mở 1 ống kính — Hãy chọn mức "1.5x Nét" và giữ cách tem khoảng 20–25cm để lấy nét rõ nhất!');
       return;
     }
     selectedRearDeviceIdx = (selectedRearDeviceIdx + 1) % rearVideoDevices.length;
@@ -3388,7 +3328,6 @@
   }
 
   async function requestUniversalCameraStream() {
-    // Nếu người dùng đã bấm nút Đổi ống kính (VD: chuyển sang ống kính góc rộng / lấy nét gần Macro trên điện thoại nhiều mắt camera) -> mở đúng ống kính đó!
     if (selectedRearDeviceIdx >= 0 && rearVideoDevices.length >= 2) {
       const targetDev = rearVideoDevices[selectedRearDeviceIdx % rearVideoDevices.length];
       if (targetDev && targetDev.deviceId) {
@@ -3397,8 +3336,8 @@
             audio: false,
             video: {
               deviceId: { exact: targetDev.deviceId },
-              width: { ideal: 2560 },
-              height: { ideal: 1440 }
+              width: { ideal: 3264 },
+              height: { ideal: 2448 }
             }
           });
         } catch (e) {
@@ -3412,9 +3351,25 @@
       }
     }
 
-    // Ưu tiên chuẩn 2K QHD (2560x1440) & FullHD (1920x1080) trước 4K:
-    // Giúp mọi điện thoại iOS/Android lấy nét cận cảnh tự động (Macro/PDAF 10-15cm) nhanh gấp đôi và tốc độ màn trập nhanh không nhòe chữ NSX/HSD!
+    // Ưu tiên chuẩn cảm biến CHỤP ẢNH TĨNH 4:3 (3264x2448 / 2560x1920 / 1920x1440) giống hệt Máy ảnh gốc điện thoại:
+    // Kích hoạt lấy nét cảm biến cứng toàn khung thay vì bị cắt xén như chế độ quay phim 16:9!
     const constraintsList = [
+      {
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 3264 },
+          height: { ideal: 2448 }
+        }
+      },
+      {
+        audio: false,
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 2560 },
+          height: { ideal: 1920 }
+        }
+      },
       {
         audio: false,
         video: {
@@ -3429,14 +3384,6 @@
           facingMode: { ideal: 'environment' },
           width: { ideal: 1920 },
           height: { ideal: 1080 }
-        }
-      },
-      {
-        audio: false,
-        video: {
-          facingMode: { ideal: 'environment' },
-          width: { ideal: 3840 },
-          height: { ideal: 2160 }
         }
       },
       {
@@ -3467,34 +3414,58 @@
         }
       }
     }
-    throw lastErr || new Error('Thiết bị không có Camera khả dụng');
+    throw lastErr || new Error('Thiết bị không có Máy ảnh khả dụng');
   }
 
-  function refreshAutoSnapBtnUI() {
-    const btn = document.getElementById('btnToggleAutoSnap');
-    if (!btn) return;
-    const isOn = Boolean(settings.autoSnapCamera);
-    btn.classList.toggle('active', isOn);
-    btn.textContent = isOn ? '⚡ Tự chốt: BẬT' : '⚡ Tự chốt: TẮT';
-  }
-
-  async function triggerCameraRefocus() {
+  async function triggerCameraRefocus(ev) {
     if (!mediaStream) return;
+    const viewportBox = document.getElementById('cameraViewportBox');
+    const ringEl = document.getElementById('tapFocusRing');
+    let normX = 0.5;
+    let normY = 0.5;
+    if (ev && viewportBox && typeof ev.clientX === 'number') {
+      const rect = viewportBox.getBoundingClientRect();
+      const relX = Math.max(24, Math.min(rect.width - 24, ev.clientX - rect.left));
+      const relY = Math.max(24, Math.min(rect.height - 24, ev.clientY - rect.top));
+      normX = Math.max(0.05, Math.min(0.95, relX / Math.max(1, rect.width)));
+      normY = Math.max(0.05, Math.min(0.95, relY / Math.max(1, rect.height)));
+      if (ringEl) {
+        ringEl.style.left = relX + 'px';
+        ringEl.style.top = relY + 'px';
+        ringEl.classList.remove('active');
+        void ringEl.offsetWidth;
+        ringEl.classList.add('active');
+        setTimeout(function () {
+          ringEl.classList.remove('active');
+        }, 700);
+      }
+    }
+
     const track = mediaStream.getVideoTracks()[0];
     if (!track || !track.getCapabilities || !track.applyConstraints) return;
     try {
       const caps = track.getCapabilities();
+      const focusConstraint = {};
+      if (caps.pointsOfInterest) {
+        focusConstraint.pointsOfInterest = [{ x: normX, y: normY }];
+      }
       if (caps.focusMode) {
         if (caps.focusMode.indexOf('single-shot') !== -1) {
-          await track.applyConstraints({ advanced: [{ focusMode: 'single-shot' }] });
+          focusConstraint.focusMode = 'single-shot';
+          await track.applyConstraints({ advanced: [focusConstraint] });
           setTimeout(function () {
             if (caps.focusMode.indexOf('continuous') !== -1) {
               track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(function () {});
             }
           }, 420);
-        } else if (caps.focusMode.indexOf('continuous') !== -1) {
-          await track.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+          return;
         }
+        if (caps.focusMode.indexOf('continuous') !== -1) {
+          focusConstraint.focusMode = 'continuous';
+        }
+      }
+      if (Object.keys(focusConstraint).length > 0) {
+        await track.applyConstraints({ advanced: [focusConstraint] });
       }
     } catch (e) {}
   }
@@ -3506,25 +3477,26 @@
     const viewportBox = document.getElementById('cameraViewportBox');
 
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      httpsPrompt.style.display = 'block';
-      viewportBox.style.display = 'flex';
+      if (httpsPrompt) httpsPrompt.style.display = 'block';
+      if (viewportBox) viewportBox.style.display = 'flex';
       const httpsUrl = (location.port === '8088')
-        ? ('https://' + location.hostname + ':8443/' + location.search + '#camera')
-        : ('https://longdoanthanh-bot.github.io/scan-ton-kho/' + location.search + '#camera');
-      document.getElementById('btnJumpHttps').href = httpsUrl;
-      statusEl.textContent = '🔒 Hãy bấm nút xanh phía trên để mở qua kết nối bảo mật HTTPS!';
+        ? ('https://' + location.hostname + ':8443/' + location.search)
+        : ('https://longdoanthanh-bot.github.io/scan-ton-kho/' + location.search);
+      const jumpBtn = document.getElementById('btnJumpHttps');
+      if (jumpBtn) jumpBtn.href = httpsUrl;
+      if (statusEl) statusEl.textContent = '🔒 Hãy bấm nút xanh phía trên để mở qua kết nối bảo mật HTTPS!';
       return;
     }
 
-    httpsPrompt.style.display = 'none';
-    viewportBox.style.display = 'flex';
+    if (httpsPrompt) httpsPrompt.style.display = 'none';
+    if (viewportBox) viewportBox.style.display = 'flex';
 
     await warmUpWasmEngine();
     await ensureNativeBarcodeDetector();
-    setTimeout(function () { warmUpOcrWorker(); }, 40);
+    setTimeout(function () { warmUpOcrWorker(); }, 30);
 
     try {
-      statusEl.textContent = 'Đang khởi động Camera độ nét cao...';
+      if (statusEl) statusEl.textContent = 'Đang mở Máy ảnh chụp 1 chạm độ nét cao...';
       mediaStream = await requestUniversalCameraStream();
 
       const video = document.getElementById('cameraVideo');
@@ -3536,6 +3508,15 @@
 
       const track = mediaStream.getVideoTracks()[0];
       hardwareZoomSupported = false;
+      imageCaptureDevice = null;
+      if (track && typeof window.ImageCapture === 'function') {
+        try {
+          imageCaptureDevice = new window.ImageCapture(track);
+        } catch (icErr) {
+          imageCaptureDevice = null;
+        }
+      }
+
       if (track && track.getCapabilities) {
         try {
           const caps = track.getCapabilities();
@@ -3551,7 +3532,10 @@
           }
           if (caps.zoom && caps.zoom.max >= 1.4) {
             hardwareZoomSupported = true;
+            currentZoom = caps.zoom.max >= 1.5 ? 1.5 : 1;
             adv.zoom = Math.min(currentZoom, caps.zoom.max);
+          } else {
+            currentZoom = 1;
           }
           if (Object.keys(adv).length > 0) {
             await track.applyConstraints({ advanced: [adv] });
@@ -3562,12 +3546,12 @@
 
       cameraActive = true;
       singleScanActive = false;
-      livePreLock = null;
       refreshRearLensList();
       setShutterUIState('ready');
-      startLivePreLockLoop();
     } catch (err) {
-      statusEl.textContent = 'Chưa mở được Camera trực tiếp (' + (err.message || err) + '). Bấm nút tròn để chụp ảnh tem!';
+      if (statusEl) {
+        statusEl.textContent = 'Chưa mở được Máy ảnh (' + (err.message || err) + ') — Bấm "📚 Tải ảnh có sẵn" bên dưới!';
+      }
     }
   }
 
@@ -3579,25 +3563,19 @@
     if (!viewportBox || !statusEl || !iconEl || !textEl) return;
 
     viewportBox.classList.remove('is-scanning', 'is-captured');
-    if (mode !== 'ready') {
-      viewportBox.classList.remove('is-prelocked');
-    }
-    if (mode === 'scanning') {
-      viewportBox.classList.add('is-scanning');
-      iconEl.textContent = '🎯';
-      textEl.textContent = 'SIÊU TỐC';
-      statusEl.textContent = customText || '⚡ Đang bắt nét dải mã vạch sọc...';
-    } else if (mode === 'captured') {
+    if (mode === 'captured') {
       viewportBox.classList.add('is-captured');
-      iconEl.textContent = '✅';
-      textEl.textContent = 'XONG';
-      statusEl.textContent = customText || '✅ Đã chốt tức thì! Đổi sang tem kế tiếp';
+      iconEl.textContent = '📸';
+      textEl.textContent = 'CHỤP';
+      statusEl.textContent = customText || '✅ Đã nổi hình & tự động ghi nhận! Chụp tiếp tem sau được ngay';
     } else {
       iconEl.textContent = '📸';
-      textEl.textContent = 'QUÉT';
-      statusEl.textContent = settings.autoSnapCamera
-        ? '⚡ Tự chốt v17 đang BẬT: Giữ trọn tem trong khung (hoặc dùng 📚 Loạt ảnh nếu tem quá nhỏ)!'
-        : '👆 Bản v17: Bấm nút tròn chốt • Nếu khó lấy nét gần, bấm "📚 Loạt ảnh" chụp bằng Máy ảnh ĐT!';
+      textEl.textContent = 'CHỤP';
+      statusEl.textContent = customText || (
+        rescueTargetRecordId
+          ? '🎯 Đưa rõ góc chữ NSX / HSD vào khung → Bấm nút tròn CHỤP để bù ngày ngay!'
+          : '👆 Chạm vào tem để lấy nét → Bấm nút tròn là nổi hình & ghi nhận ngay (Bỏ qua nút OK)!'
+      );
     }
   }
 
@@ -3609,7 +3587,7 @@
     });
 
     const video = document.getElementById('cameraVideo');
-    if (!mediaStream) return;
+    if (!mediaStream || !video) return;
     const track = mediaStream.getVideoTracks()[0];
     if (hardwareZoomSupported && track) {
       try {
@@ -3623,28 +3601,397 @@
     video.style.transform = currentZoom > 1 ? ('scale(' + currentZoom + ')') : 'none';
   }
 
+  function triggerShutterFlashEffect() {
+    const fl = document.getElementById('shutterFlashOverlay');
+    if (!fl) return;
+    fl.classList.add('flash');
+    setTimeout(function () {
+      fl.classList.remove('flash');
+    }, 85);
+  }
+
+  function createThumbnailDataUrl(srcCanvas, maxThumbW) {
+    try {
+      const tw = Math.min(maxThumbW || 200, Math.max(80, srcCanvas.width));
+      const th = Math.max(60, Math.round(srcCanvas.height * (tw / Math.max(1, srcCanvas.width))));
+      const tc = document.createElement('canvas');
+      tc.width = tw;
+      tc.height = th;
+      const tctx = tc.getContext('2d');
+      tctx.drawImage(srcCanvas, 0, 0, tw, th);
+      return tc.toDataURL('image/jpeg', 0.78);
+    } catch (e) {
+      return '';
+    }
+  }
+
+  function updateSnapPopCardUI(opts) {
+    const card = document.getElementById('snapPopCard');
+    const thumb = document.getElementById('snapPopThumb');
+    const badge = document.getElementById('snapPopBadge');
+    const title = document.getElementById('snapPopTitle');
+    const dates = document.getElementById('snapPopDates');
+    const btnRescue = document.getElementById('btnSnapPopRescueDates');
+    const btnEdit = document.getElementById('btnSnapPopEdit');
+    const btnUndo = document.getElementById('btnSnapPopUndo');
+    if (!card || !badge || !title || !dates) return;
+
+    card.style.display = 'flex';
+    card.className = 'snap-pop-card' + (opts.stateClass ? (' ' + opts.stateClass) : '');
+
+    if (opts.thumbSrc && thumb) {
+      thumb.src = opts.thumbSrc;
+    }
+    badge.textContent = opts.badge || '';
+    title.textContent = opts.title || '—';
+    dates.textContent = opts.dates || '';
+
+    const recId = opts.recordId || null;
+    if (btnRescue) {
+      if (recId && opts.showRescue) {
+        btnRescue.style.display = 'inline-block';
+        btnRescue.onclick = function () {
+          rescueDatesForRecord(recId);
+        };
+      } else {
+        btnRescue.style.display = 'none';
+      }
+    }
+    if (btnEdit) {
+      if (recId) {
+        btnEdit.style.display = 'inline-block';
+        btnEdit.onclick = function () {
+          openEditModal(recId);
+        };
+      } else {
+        btnEdit.style.display = 'none';
+      }
+    }
+    if (btnUndo) {
+      if (recId) {
+        btnUndo.style.display = 'inline-block';
+        btnUndo.onclick = function () {
+          undoSnapRecordImmediate(recId);
+        };
+      } else {
+        btnUndo.style.display = 'none';
+      }
+    }
+  }
+
+  function undoSnapRecordImmediate(recordId) {
+    const rec = records.find(function (r) { return r.id === recordId; });
+    if (!rec) return;
+    const label = (rec.productName || ('Mã ' + rec.productCode)) + ' (' + formatKg(rec.grams) + ' Kg)';
+    delete readingDateRecordIds[recordId];
+    records = records.filter(function (r) { return r.id !== recordId; });
+    persistRecords();
+    enqueueOp({ type: 'delete', id: recordId });
+    renderAll(false);
+    flushSyncQueue(false);
+    const card = document.getElementById('snapPopCard');
+    if (card) card.style.display = 'none';
+    showBanner('warn', '🗑️ Đã hủy tấm vừa chụp: "' + label + '"!');
+  }
+
+  function takeHardwareStillPhotoWithTimeout(icDev, timeoutMs) {
+    if (!icDev || typeof icDev.takePhoto !== 'function') {
+      return Promise.resolve(null);
+    }
+    return new Promise(function (resolve) {
+      let settled = false;
+      const t = setTimeout(function () {
+        if (!settled) { settled = true; resolve(null); }
+      }, timeoutMs || 1200);
+
+      Promise.resolve().then(async function () {
+        let photoOpts = undefined;
+        if (typeof icDev.getPhotoCapabilities === 'function') {
+          try {
+            const pc = await icDev.getPhotoCapabilities();
+            if (pc && pc.imageWidth && pc.imageWidth.max) {
+              photoOpts = { imageWidth: Math.min(3264, pc.imageWidth.max) };
+            }
+          } catch (e) {}
+        }
+        return photoOpts ? icDev.takePhoto(photoOpts) : icDev.takePhoto();
+      }).then(function (blob) {
+        if (!settled) {
+          settled = true;
+          clearTimeout(t);
+          resolve((blob && blob.size > 800) ? blob : null);
+        }
+      }).catch(function () {
+        if (!settled) {
+          settled = true;
+          clearTimeout(t);
+          resolve(null);
+        }
+      });
+    });
+  }
+
   function onShutterScanClick() {
     if (Date.now() < shutterLockUntil) return;
 
     if (!cameraActive || !mediaStream) {
-      document.getElementById('hiddenImageInput').click();
+      const gal = document.getElementById('batchGalleryInput');
+      if (gal) gal.click();
       return;
     }
 
-    if (singleScanActive) {
-      singleScanActive = false;
-      singleScanToken += 1;
-      setShutterUIState('ready');
+    const video = document.getElementById('cameraVideo');
+    if (!video || video.readyState < 2 || video.videoWidth <= 0) {
       return;
     }
 
-    runSingleShotCameraScan();
+    shutterLockUntil = Date.now() + 180;
+    triggerShutterFlashEffect();
+
+    // 1. NỔI HÌNH LÊN NGAY TỨC KHẮC Ở GIÂY THỨ 0 (KHÔNG QUA MÀN HÌNH OK XÁC NHẬN!)
+    const instantStillCanvas = captureVideoToCanvas(video, null, 2400);
+    const instantThumb = createThumbnailDataUrl(instantStillCanvas, 200);
+    const shotRescueRecId = rescueTargetRecordId;
+    rescueTargetRecordId = null;
+
+    pendingSnapJobsCount += 1;
+    const queueNote = pendingSnapJobsCount > 1 ? (' (Hàng chờ: ' + pendingSnapJobsCount + ' tấm)') : '';
+    updateSnapPopCardUI({
+      stateClass: '',
+      thumbSrc: instantThumb,
+      badge: '⚡ ĐÃ CHỤP • ĐANG TỰ ĐỘNG GHI NHẬN' + queueNote,
+      title: shotRescueRecId ? 'Đang đọc bù NSX / HSD từ ảnh vừa chụp...' : 'Đang lấy Mã SP • Số ký • NSX • HSD...',
+      dates: 'Không cần bấm OK — có thể hướng sang tem kế tiếp ngay!',
+      recordId: null
+    });
+    setShutterUIState('captured');
+
+    // 2. Lấy ảnh chụp tĩnh phần cứng độ nét gốc (ImageCapture.takePhoto trên Android) song song với khung dự phòng 2400px
+    const hwBlobPromise = takeHardwareStillPhotoWithTimeout(imageCaptureDevice, 1200);
+
+    // 3. Đưa vào hàng đợi xử lý tuần tự & TỰ ĐỘNG GHI NHẬN LÊN GOOGLE SHEET SCAN TỒN
+    photoSnapQueue = photoSnapQueue.then(async function () {
+      let workCanvas = instantStillCanvas;
+      let finalThumb = instantThumb;
+      try {
+        await warmUpWasmEngine();
+        await ensureNativeBarcodeDetector();
+        await warmUpOcrWorker();
+
+        const hwBlob = await hwBlobPromise;
+        if (hwBlob) {
+          try {
+            const hwPack = await loadCleanCanvasFromFile(hwBlob, 2400);
+            if (hwPack && hwPack.canvas && hwPack.canvas.width > 100) {
+              if (workCanvas && workCanvas !== hwPack.canvas) {
+                workCanvas.width = 0;
+                workCanvas.height = 0;
+              }
+              workCanvas = hwPack.canvas;
+              finalThumb = createThumbnailDataUrl(workCanvas, 200) || instantThumb;
+            }
+          } catch (e) {}
+        }
+
+        // Trường hợp A: Chụp bù ngày NSX/HSD cho dòng cụ thể
+        if (shotRescueRecId) {
+          const recTarget = records.find(function (r) { return r.id === shotRescueRecId; });
+          const posRescue = await detectBarcodePositionOnCanvas(workCanvas);
+          const rescueDates = await extractNsxHsdWithTimeout(
+            workCanvas,
+            posRescue,
+            4500,
+            true,
+            posRescue ? null : cropCenterAimFromCanvas(workCanvas)
+          );
+          if (recTarget && (rescueDates.nsx || rescueDates.hsd)) {
+            if (rescueDates.nsx) recTarget.nsx = rescueDates.nsx;
+            if (rescueDates.hsd) recTarget.hsd = rescueDates.hsd;
+            persistRecords();
+            enqueueOp({ type: 'update', record: toSyncRecord(recTarget) });
+            renderAll(true);
+            flushSyncQueue(false);
+            playBeep('ok');
+            updateSnapPopCardUI({
+              stateClass: 'state-ok',
+              thumbSrc: finalThumb,
+              badge: '✅ ĐÃ BÙ NSX / HSD & LƯU TỰ ĐỘNG!',
+              title: (recTarget.productName || ('Mã ' + recTarget.productCode)) + ' — ' + formatKg(recTarget.grams) + ' Kg',
+              dates: 'NSX: ' + formatLotDateDisplay(recTarget.nsx) + ' • HSD: ' + formatLotDateDisplay(recTarget.hsd),
+              recordId: recTarget.id,
+              showRescue: !(recTarget.nsx && recTarget.hsd)
+            });
+          } else {
+            playBeep('error');
+            updateSnapPopCardUI({
+              stateClass: 'state-err',
+              thumbSrc: finalThumb,
+              badge: '❌ CHƯA RÕ DÒNG NSX / HSD — CHỤP LẠI!',
+              title: 'Chưa đọc rõ ngày trên tấm vừa chụp',
+              dates: 'Đưa rõ góc chữ NSX / HSD vào khung rồi bấm Chụp lại',
+              recordId: shotRescueRecId,
+              showRescue: true
+            });
+          }
+          return;
+        }
+
+        // Trường hợp B: Chụp tem bình thường -> Giải mã mã vạch 1D 13 số (khóa cứng QR Code!) + Đọc trọn NSX & HSD rồi GHI NHẬN TỰ ĐỘNG!
+        const hit = await decodePhotoInBrowserWasm(hwBlob, workCanvas);
+        if (hit && hit.code) {
+          const parsed = parseSingle13DigitScaleBarcode(hit.code);
+          if (!parsed.ok) {
+            playBeep('error');
+            updateSnapPopCardUI({
+              stateClass: 'state-err',
+              thumbSrc: finalThumb,
+              badge: '❌ MÃ VẠCH KHÔNG HỢP LỆ — KHÔNG GHI NHẬN',
+              title: parsed.error,
+              dates: 'Chỉ nhận mã vạch sọc 13 số của tem cân hàng!',
+              recordId: null
+            });
+            showBanner('error', parsed.error);
+            return;
+          }
+
+          let posUse = hit.position || null;
+          if (!posUse) {
+            const det = await detectBarcodeCodeAndPosOnCanvas(workCanvas);
+            if (det && det.pos) posUse = det.pos;
+          }
+
+          const dates = await extractNsxHsdWithTimeout(
+            workCanvas,
+            posUse,
+            5600,
+            true,
+            posUse ? null : cropCenterAimFromCanvas(workCanvas)
+          );
+
+          // Nếu người dùng tự bật hỏi trùng trong Cài Đặt (mặc định v18 là TẮT để bỏ qua mọi nút xác nhận)
+          if (
+            settings.duplicateAskSec > 0 &&
+            parsed.rawBarcode === lastScannedCode &&
+            (Date.now() - lastScannedEpoch) < settings.duplicateAskSec * 1000
+          ) {
+            playBeep('warn');
+            pendingDuplicateCode = parsed.rawBarcode;
+            pendingDuplicateDates = dates;
+            pendingDuplicateDateCtx = null;
+            document.getElementById('dupModalBarcode').textContent = parsed.rawBarcode;
+            document.getElementById('dupModalInfo').textContent =
+              (parsed.productName || 'Chưa có tên') + ' (' + parsed.productCode + ') — ' + formatKg(parsed.grams) + ' Kg';
+            openModal('duplicateModal');
+            return;
+          }
+
+          const committed = commitBatchPhotoScan(parsed, dates, '');
+          if (committed.ok && committed.record) {
+            const r = committed.record;
+            const hasBoth = Boolean(r.nsx && r.hsd);
+            renderAll(true);
+            flushSyncQueue(false);
+            playBeep('ok');
+            if (pendingSnapJobsCount <= 1) {
+              vibrateDevice([35]);
+            }
+            updateSnapPopCardUI({
+              stateClass: hasBoth ? 'state-ok' : 'state-warn',
+              thumbSrc: finalThumb,
+              badge: hasBoth ? '✅ ĐÃ GHI NHẬN TỰ ĐỘNG!' : '⚠️ ĐÃ GHI NHẬN MÃ & KÝ (BẤM BÙ NGÀY NẾU CẦN)',
+              title: (r.productName || ('Mã ' + r.productCode)) + ' (' + r.productCode + ') — ' + formatKg(r.grams) + ' Kg',
+              dates: 'NSX: ' + formatLotDateDisplay(r.nsx) + ' • HSD: ' + formatLotDateDisplay(r.hsd),
+              recordId: r.id,
+              showRescue: !hasBoth
+            });
+            showBanner(
+              hasBoth ? 'ok' : 'warn',
+              '✅ Đã ghi nhận: ' + (r.productName || ('Mã ' + r.productCode)) + ' (' + r.productCode + ') — ' +
+              formatKg(r.grams) + ' Kg | NSX: ' + formatLotDateDisplay(r.nsx) + ' • HSD: ' + formatLotDateDisplay(r.hsd)
+            );
+          } else {
+            playBeep('error');
+            updateSnapPopCardUI({
+              stateClass: 'state-err',
+              thumbSrc: finalThumb,
+              badge: '❌ LỖI KCS NỘI BỘ',
+              title: committed.error || 'Không thể lưu dòng này',
+              dates: 'Vui lòng chụp lại!',
+              recordId: null
+            });
+          }
+          return;
+        }
+
+        // Trường hợp C: Không có mã vạch trong khung nhưng dòng vừa chụp ngay trước đó đang thiếu NSX/HSD -> Tự động đọc bù ngày luôn!
+        const latestRec = records.length > 0 ? records[records.length - 1] : null;
+        if (latestRec && (!latestRec.nsx || !latestRec.hsd)) {
+          const onlyDates = await extractNsxHsdWithTimeout(
+            workCanvas,
+            null,
+            3200,
+            true,
+            cropCenterAimFromCanvas(workCanvas)
+          );
+          if (onlyDates.nsx || onlyDates.hsd) {
+            if (onlyDates.nsx) latestRec.nsx = onlyDates.nsx;
+            if (onlyDates.hsd) latestRec.hsd = onlyDates.hsd;
+            persistRecords();
+            enqueueOp({ type: 'update', record: toSyncRecord(latestRec) });
+            renderAll(true);
+            flushSyncQueue(false);
+            playBeep('ok');
+            updateSnapPopCardUI({
+              stateClass: 'state-ok',
+              thumbSrc: finalThumb,
+              badge: '✅ ĐÃ TỰ ĐỘNG BÙ NSX / HSD VÀO TEM TRƯỚC!',
+              title: (latestRec.productName || ('Mã ' + latestRec.productCode)) + ' — ' + formatKg(latestRec.grams) + ' Kg',
+              dates: 'NSX: ' + formatLotDateDisplay(latestRec.nsx) + ' • HSD: ' + formatLotDateDisplay(latestRec.hsd),
+              recordId: latestRec.id,
+              showRescue: !(latestRec.nsx && latestRec.hsd)
+            });
+            return;
+          }
+        }
+
+        // Trường hợp D: Ảnh mờ / ngoài mặt tem -> Báo đỏ rõ ràng theo chuẩn Fail-Closed (tuyệt đối không tự đoán số liệu!)
+        playBeep('error');
+        updateSnapPopCardUI({
+          stateClass: 'state-err',
+          thumbSrc: finalThumb,
+          badge: '❌ CHƯA RÕ MÃ VẠCH 13 SỐ — CHƯA GHI NHẬN',
+          title: 'Ảnh vừa chụp chưa thấy rõ dải mã vạch 13 số',
+          dates: 'Chạm vào mặt tem cho nét rồi bấm nút tròn Chụp lại!',
+          recordId: null
+        });
+      } catch (err) {
+        playBeep('error');
+        updateSnapPopCardUI({
+          stateClass: 'state-err',
+          thumbSrc: finalThumb,
+          badge: '❌ KHÔNG ĐỌC ĐƯỢC ẢNH VỪA CHỤP',
+          title: 'Vui lòng bấm nút tròn chụp lại!',
+          dates: '',
+          recordId: null
+        });
+      } finally {
+        if (workCanvas) {
+          workCanvas.width = 0;
+          workCanvas.height = 0;
+        }
+        pendingSnapJobsCount = Math.max(0, pendingSnapJobsCount - 1);
+        if (pendingSnapJobsCount === 0) {
+          setShutterUIState('ready');
+          setTimeout(checkPendingSwReload, 150);
+        }
+      }
+    });
   }
 
   function captureVideoToCanvas(video, targetCanvas, maxDimLimit) {
     const vw = video.videoWidth;
     const vh = video.videoHeight;
-    const maxDim = maxDimLimit || 2200;
+    const maxDim = maxDimLimit || 2400;
     const scale = Math.min(1, maxDim / Math.max(1, Math.max(vw, vh)));
     const ow = Math.max(200, Math.round(vw * scale));
     const oh = Math.max(150, Math.round(vh * scale));
@@ -4150,441 +4497,10 @@
     });
   }
 
-  function startLivePreLockLoop() {
-    const myLoopId = ++radarLoopId;
-    const video = document.getElementById('cameraVideo');
-    const radarFrameCanvas = document.createElement('canvas');
-    const workCanvas = document.createElement('canvas');
-    const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
-    let tick = 0;
-
-    async function step() {
-      if (!cameraActive || !mediaStream || radarLoopId !== myLoopId) return;
-
-      // Nhường trọn 100% sức mạnh chip điện thoại cho bộ đọc chữ NSX/HSD khi vừa chốt tem (giúp tốc độ đọc ngày trên ĐT nhanh gấp 3 lần!)
-      if (activeDateReadsCount > 0) {
-        setTimeout(step, 280);
-        return;
-      }
-
-      if (!singleScanActive && video && video.readyState >= 2 && video.videoWidth > 0) {
-        tick += 1;
-        const vw = video.videoWidth;
-        const vh = video.videoHeight;
-
-        // ĐÓNG BĂNG KHUNG HÌNH 1720PX TRƯỚC KHI GIẢI MÃ MÃ VẠCH -> Phản hồi nút bấm siêu nhạy <0.12s, sai số dịch chuyển tay 0.00px & giữ nguyên độ nét chữ NSX/HSD!
-        captureVideoToCanvas(video, radarFrameCanvas, 1720);
-        const fw = radarFrameCanvas.width;
-        const fh = radarFrameCanvas.height;
-
-        let foundCode = null;
-        let foundParsed = null;
-        let foundPosOnFrame = null;
-
-        // 1. Thử bộ giải mã phần cứng trực tiếp trên khung đóng băng (~3ms)
-        if (nativeDetector) {
-          try {
-            const vHits = await nativeDetector.detect(radarFrameCanvas);
-            if (vHits && vHits.length > 0) {
-              for (let k = 0; k < vHits.length; k++) {
-                const raw = String(vHits[k].rawValue || '').trim();
-                const chk = parseSingle13DigitScaleBarcode(raw);
-                if (chk.ok) {
-                  foundCode = raw;
-                  foundParsed = chk;
-                  foundPosOnFrame = extractPosFromNativeHit(vHits[k], 1, 1);
-                  break;
-                }
-              }
-            }
-          } catch (e) {}
-        }
-
-        // 2. Xoay vòng quét độ phân giải cao trên cùng khung đóng băng (cận cảnh, cự ly xa 45cm, thiếu sáng, cầm nghiêng)
-        if (!foundCode && cameraActive && !singleScanActive && radarLoopId === myLoopId) {
-          const vis = getVisibleAimRectInVideo(video, 0.08);
-          const scaleX = fw / Math.max(1, vw);
-          const scaleY = fh / Math.max(1, vh);
-          const alreadyLockedFresh = Boolean(
-            autoSnapStreakCount >= 1 || (livePreLock && (Date.now() - livePreLock.lockedAt) < 520)
-          );
-          const modeIdx = alreadyLockedFresh ? (tick % 2) : (tick % 5);
-          let rx = Math.round(vis.sx * scaleX);
-          let ry = Math.round(vis.sy * scaleY);
-          let rw = Math.max(120, Math.round(vis.sw * scaleX));
-          let rh = Math.max(90, Math.round(vis.sh * scaleY));
-          let deg = 0;
-          let doSharp = true;
-
-          if (modeIdx === 0) {
-            doSharp = false;
-          } else if (modeIdx === 2) {
-            // Phóng tâm quang học giữ nguyên điểm ảnh gốc cho tem đặt ở xa 35-50cm
-            const zw = Math.max(160, Math.round(rw * 0.56));
-            const zh = Math.max(110, Math.round(rh * 0.56));
-            rx = rx + Math.round((rw - zw) / 2);
-            ry = ry + Math.round((rh - zh) / 2);
-            rw = zw;
-            rh = zh;
-          } else if (modeIdx === 3) {
-            deg = -11;
-          } else if (modeIdx === 4) {
-            deg = 11;
-          }
-
-          rx = Math.max(0, Math.min(fw - 10, rx));
-          ry = Math.max(0, Math.min(fh - 10, ry));
-          rw = Math.max(10, Math.min(fw - rx, rw));
-          rh = Math.max(10, Math.min(fh - ry, rh));
-
-          const hit = await tryDecodeRegionOnCanvas(
-            workCanvas, workCtx, radarFrameCanvas, rx, ry, rw, rh, deg, 1650, 22, doSharp, false
-          );
-          if (hit && hit.code && !(hit.fromPureJs && deg !== 0 && !hit.isFlatJs && window.ZXingWASM)) {
-            const chk = parseSingle13DigitScaleBarcode(hit.code);
-            if (chk.ok) {
-              foundCode = hit.code;
-              foundParsed = chk;
-              if (hit.posOnWork) {
-                foundPosOnFrame = mapPositionToTargetCanvas(
-                  hit.posOnWork, hit.dw, hit.dh, deg, rx, ry, rw, rh, fw, fh, fw, fh, hit.pad
-                );
-              }
-            }
-          }
-        }
-
-        if (foundCode && foundParsed && cameraActive && !singleScanActive && radarLoopId === myLoopId) {
-          const mappedPos = foundPosOnFrame;
-          const dateInFrame = hasDateZoneInsideFrame(mappedPos, fw, fh);
-          const sharpness = measureDateZoneSharpness(radarFrameCanvas, mappedPos);
-          const frameScore = (dateInFrame ? 1000 : 0) + sharpness;
-
-          const nowTick = Date.now();
-          if (foundCode === autoSnapStreakCode && (nowTick - autoSnapStreakLastAt) < 900) {
-            autoSnapStreakCount += 1;
-          } else {
-            autoSnapStreakCode = foundCode;
-            autoSnapStreakCount = 1;
-          }
-          autoSnapStreakLastAt = nowTick;
-
-          // Khóa giữ khung sắc nét nhất (Peak-Sharpness Lock) trong 0.90 giây của cùng tem này — chống nhòe khi ngón cái di chuyển bấm nút chụp!
-          if (
-            livePreLock &&
-            livePreLock.code === foundCode &&
-            (nowTick - livePreLock.lockedAt) < 900 &&
-            (livePreLock.frameScore || 0) >= frameScore
-          ) {
-            livePreLock.lockedAt = nowTick;
-          } else {
-            livePreLock = {
-              code: foundCode,
-              parsed: foundParsed,
-              frameCanvas: cloneCanvas(radarFrameCanvas),
-              barcodePos: mappedPos,
-              dateInFrame: dateInFrame,
-              frameScore: frameScore,
-              lockedAt: nowTick
-            };
-          }
-
-          const viewportBox = document.getElementById('cameraViewportBox');
-          const statusEl = document.getElementById('cameraStatusBadge');
-
-          // TỰ BÙ RẢNH TAY THÔNG MINH: Nếu tem vừa quét (trong 25 giây gần nhất) có đúng mã vạch 13 số này mà lúc đầu bị mờ/khuất chưa có NSX/HSD,
-          // chỉ cần giữ ống kính trước tem là máy TỰ ĐỘNG đọc bù NSX/HSD điền thẳng vào dòng đó & đẩy lên Sheet (không tạo dòng trùng rỗng)!
-          const latestRec = records.length > 0 ? records[records.length - 1] : null;
-          const sameLatestMissingDates = Boolean(
-            latestRec &&
-            latestRec.rawBarcode === foundCode &&
-            (!latestRec.nsx || !latestRec.hsd) &&
-            (nowTick - lastScannedEpoch) < 25000
-          );
-
-          if (
-            sameLatestMissingDates &&
-            autoSnapStreakCount >= 2 &&
-            !readingDateRecordIds[latestRec.id] &&
-            dateInFrame &&
-            (nowTick - lastLiveAutoRescueAt) > 950
-          ) {
-            lastLiveAutoRescueAt = nowTick;
-            lastAutoSnappedCode = foundCode;
-            lastAutoSnappedEpoch = nowTick;
-            const frozenRescue = cloneCanvas(radarFrameCanvas);
-            readingDateRecordIds[latestRec.id] = true;
-            readingDateStartedAt[latestRec.id] = nowTick;
-            renderAll(false);
-            fillRecordDatesInBackground(latestRec.id, {
-              frameCanvas: frozenRescue,
-              barcodePos: mappedPos,
-              candidateFrames: [
-                { canvas: frozenRescue, pos: mappedPos }
-              ],
-              liveVideo: video,
-              allowTilt: true,
-              fromLiveAutoRescue: true
-            });
-          }
-
-          let holdAutoSnapForDates = false;
-          if (!livePreLock.dateInFrame) {
-            if (edgeClipHoldCode !== foundCode) {
-              edgeClipHoldCode = foundCode;
-              edgeClipHoldSince = nowTick;
-            }
-            if ((nowTick - edgeClipHoldSince) < 950) {
-              holdAutoSnapForDates = true;
-            }
-          } else {
-            edgeClipHoldCode = '';
-            edgeClipHoldSince = 0;
-          }
-
-          // Chế độ ⚡ Tự chốt: Đợi đúng 2 nhịp bắt nét liên tiếp (~0.09 giây) + lấy khung độ nét gốc 2400px!
-          if (
-            settings.autoSnapCamera &&
-            autoSnapStreakCount >= 2 &&
-            !holdAutoSnapForDates &&
-            !sameLatestMissingDates &&
-            nowTick >= shutterLockUntil &&
-            !(foundCode === lastAutoSnappedCode && (nowTick - lastAutoSnappedEpoch) < 4200)
-          ) {
-            lastAutoSnappedCode = foundCode;
-            lastAutoSnappedEpoch = nowTick;
-            autoSnapStreakCount = 0;
-            shutterLockUntil = nowTick + 650;
-            const snapUse = livePreLock;
-            livePreLock = null;
-            setShutterUIState(
-              'captured',
-              '⚡ Tự chốt: ' + (foundParsed.productName || foundParsed.productCode) + ' (' + formatKg(foundParsed.grams) + ' Kg)'
-            );
-            handleBarcodeInput(snapUse.code, 'Camera Auto', null, {
-              frameCanvas: snapUse.frameCanvas,
-              barcodePos: snapUse.barcodePos,
-              candidateFrames: [
-                { canvas: snapUse.frameCanvas, pos: snapUse.barcodePos, score: snapUse.frameScore || 500 }
-              ],
-              liveVideo: video,
-              allowTilt: true
-            });
-            setTimeout(function () {
-              if (!singleScanActive && cameraActive) {
-                setShutterUIState('ready');
-              }
-            }, 620);
-          } else if (viewportBox && statusEl && !viewportBox.classList.contains('is-captured')) {
-            viewportBox.classList.add('is-prelocked');
-            statusEl.textContent = !dateInFrame
-              ? ('📐 Đã thấy mã ' + foundParsed.productCode + ' — Hạ nhẹ khung xuống để thấy trọn dòng NSX/HSD bên dưới!')
-              : (sameLatestMissingDates
-                ? ('⏳ Đang tự đọc bù NSX/HSD cho ' + (foundParsed.productName || foundParsed.productCode) + ' — Giữ yên 0.3s!')
-                : ('🟢 Đã bắt nét: ' + (foundParsed.productName || ('Mã ' + foundParsed.productCode)) +
-                  ' (' + formatKg(foundParsed.grams) + ' Kg) — Bấm nút tròn chốt ngay!'));
-          }
-        } else {
-          if ((Date.now() - autoSnapStreakLastAt) > 450) {
-            autoSnapStreakCount = 0;
-            autoSnapStreakCode = '';
-          }
-          if (livePreLock && (Date.now() - livePreLock.lockedAt) > 980) {
-            livePreLock = null;
-            const viewportBox = document.getElementById('cameraViewportBox');
-            if (viewportBox && viewportBox.classList.contains('is-prelocked')) {
-              viewportBox.classList.remove('is-prelocked');
-              if (!singleScanActive && !viewportBox.classList.contains('is-captured')) {
-                setShutterUIState('ready');
-              }
-            }
-          }
-        }
-      }
-
-      if (cameraActive && mediaStream && radarLoopId === myLoopId) {
-        const nextDelay = (settings.autoSnapCamera && autoSnapStreakCount === 1)
-          ? 70
-          : (livePreLock ? 145 : 95);
-        setTimeout(step, nextDelay);
-      }
-    }
-
-    setTimeout(step, 55);
-  }
-
-  async function runSingleShotCameraScan() {
-    if (!cameraActive || !mediaStream) return;
-    const video = document.getElementById('cameraVideo');
-
-    // Chốt 0.00 giây nếu bộ bắt nét ngầm đã khóa sẵn mã hợp lệ trong 0.98 giây gần nhất!
-    if (livePreLock && (Date.now() - livePreLock.lockedAt) <= 980) {
-      const snap = livePreLock;
-      livePreLock = null;
-      shutterLockUntil = Date.now() + 180;
-
-      const candidateFrames = [{ canvas: snap.frameCanvas, pos: snap.barcodePos, score: snap.frameScore || 500 }];
-
-      setShutterUIState('captured');
-      handleBarcodeInput(snap.code, 'Camera', null, {
-        frameCanvas: snap.frameCanvas,
-        barcodePos: snap.barcodePos,
-        candidateFrames: candidateFrames,
-        liveVideo: video,
-        allowTilt: true
-      });
-      setTimeout(function () {
-        if (!singleScanActive && cameraActive) {
-          setShutterUIState('ready');
-        }
-      }, 550);
-      return;
-    }
-
-    const myToken = ++singleScanToken;
-    singleScanActive = true;
-    setShutterUIState('scanning');
-
-    const frozenCanvas = document.createElement('canvas');
-    const workCanvas = document.createElement('canvas');
-    const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
-
-    const deadline = Date.now() + 1450;
-    let attempt = 0;
-    let lastInvalidError = null;
-
-    // 11 cấu hình quét siêu tốc trên khung đóng băng (0.00px lệch tọa độ): tâm chuẩn, tăng nét thiếu sáng, phóng xa 50%, toàn khung, nghiêng ±10°, ±21°, ±34°, dọc 90°
-    const sweepPlan = [
-      { mode: 'aim', deg: 0, sharp: false, nativeFirst: true },
-      { mode: 'aim', deg: 0, sharp: true, nativeFirst: false },
-      { mode: 'zoom', deg: 0, sharp: true, nativeFirst: false },
-      { mode: 'full', deg: 0, sharp: true, nativeFirst: true },
-      { mode: 'aim', deg: -10, sharp: true, nativeFirst: false },
-      { mode: 'aim', deg: 10, sharp: true, nativeFirst: false },
-      { mode: 'aim', deg: -21, sharp: true, nativeFirst: false },
-      { mode: 'aim', deg: 21, sharp: true, nativeFirst: false },
-      { mode: 'full', deg: -34, sharp: true, nativeFirst: false },
-      { mode: 'full', deg: 34, sharp: true, nativeFirst: false },
-      { mode: 'full', deg: 90, sharp: true, nativeFirst: false }
-    ];
-
-    while (singleScanActive && cameraActive && mediaStream && singleScanToken === myToken && Date.now() < deadline) {
-      if (video && video.readyState >= 2 && video.videoWidth > 0) {
-        const vw = video.videoWidth;
-        const vh = video.videoHeight;
-        captureVideoToCanvas(video, frozenCanvas, 2200);
-        const fw = frozenCanvas.width;
-        const fh = frozenCanvas.height;
-
-        const cfg = sweepPlan[attempt % sweepPlan.length];
-        attempt += 1;
-
-        let candidate = null;
-        let posOnFrozen = null;
-
-        if (cfg.nativeFirst && nativeDetector && cfg.deg === 0) {
-          try {
-            const vHits = await nativeDetector.detect(frozenCanvas);
-            if (vHits && vHits.length > 0 && vHits[0].rawValue) {
-              candidate = String(vHits[0].rawValue).trim();
-              posOnFrozen = extractPosFromNativeHit(vHits[0], 1, 1);
-            }
-          } catch (e) {}
-        }
-
-        if (!candidate) {
-          const vis = getVisibleAimRectInVideo(video, 0.10);
-          const scaleX = fw / Math.max(1, vw);
-          const scaleY = fh / Math.max(1, vh);
-          let sx = Math.round(vis.sx * scaleX);
-          let sy = Math.round(vis.sy * scaleY);
-          let sw = Math.max(120, Math.round(vis.sw * scaleX));
-          let sh = Math.max(90, Math.round(vis.sh * scaleY));
-
-          if (cfg.mode === 'zoom') {
-            const zw = Math.max(160, Math.round(sw * 0.50));
-            const zh = Math.max(110, Math.round(sh * 0.50));
-            sx = sx + Math.round((sw - zw) / 2);
-            sy = sy + Math.round((sh - zh) / 2);
-            sw = zw;
-            sh = zh;
-          } else if (cfg.mode === 'full') {
-            sx = 0;
-            sy = 0;
-            sw = fw;
-            sh = fh;
-          }
-
-          sx = Math.max(0, Math.min(fw - 10, sx));
-          sy = Math.max(0, Math.min(fh - 10, sy));
-          sw = Math.max(10, Math.min(fw - sx, sw));
-          sh = Math.max(10, Math.min(fh - sy, sh));
-
-          const hit = await tryDecodeRegionOnCanvas(
-            workCanvas, workCtx, frozenCanvas, sx, sy, sw, sh, cfg.deg, 1850, 24, cfg.sharp, false
-          );
-          if (hit && hit.code) {
-            candidate = hit.code;
-            if (hit.posOnWork) {
-              posOnFrozen = mapPositionToTargetCanvas(
-                hit.posOnWork, hit.dw, hit.dh, cfg.deg, sx, sy, sw, sh, fw, fh, fw, fh, hit.pad
-              );
-            }
-          }
-        }
-
-        if (candidate && singleScanToken === myToken && singleScanActive) {
-          const check = parseSingle13DigitScaleBarcode(candidate);
-          if (check.ok) {
-            const fullFrameCanvas = cloneCanvas(frozenCanvas);
-            singleScanActive = false;
-            singleScanToken += 1;
-            shutterLockUntil = Date.now() + 180;
-
-            setShutterUIState('captured');
-            handleBarcodeInput(candidate, 'Camera', null, {
-              frameCanvas: fullFrameCanvas,
-              barcodePos: posOnFrozen,
-              liveVideo: video,
-              allowTilt: true
-            });
-            setTimeout(function () {
-              if (!singleScanActive && cameraActive) {
-                setShutterUIState('ready');
-              }
-            }, 550);
-            return;
-          } else {
-            lastInvalidError = check.error;
-          }
-        }
-      }
-
-      await new Promise(function (r) { setTimeout(r, 14); });
-    }
-
-    if (singleScanToken === myToken && singleScanActive) {
-      singleScanActive = false;
-      singleScanToken += 1;
-      triggerCameraRefocus();
-      setShutterUIState('ready');
-      playBeep('error');
-      vibrateDevice([100, 50, 100]);
-      showBanner(
-        'error',
-        lastInvalidError || 'Chưa bắt kịp vạch sọc. Bạn có thể chạm nhẹ vào màn hình Camera để lấy nét lại hoặc bấm 1.4x rồi quét!'
-      );
-    }
-  }
-
   function stopCamera1DScanner() {
     cameraActive = false;
     singleScanActive = false;
-    singleScanToken += 1;
-    radarLoopId += 1;
-    livePreLock = null;
-    autoSnapStreakCode = '';
-    autoSnapStreakCount = 0;
+    imageCaptureDevice = null;
     const viewportBox = document.getElementById('cameraViewportBox');
     if (viewportBox) viewportBox.classList.remove('is-prelocked', 'is-scanning', 'is-captured');
     if (mediaStream) {
@@ -4684,11 +4600,6 @@
       uniqueFiles.push(f);
     }
     if (uniqueFiles.length === 0) return;
-
-    // Chuyển sang màn hình tiến trình Lô ảnh để người dùng theo dõi trực tiếp từng tấm!
-    if (currentMode !== 'batch') {
-      applyModeUI('batch');
-    }
 
     batchProcessingActive = true;
     batchCancelRequested = false;
@@ -4805,6 +4716,15 @@
                     escapeHtml(formatLotDateDisplay(r.hsd)) + '</strong> · Tệp: ' + escapeHtml(shortName),
                   r.id
                 );
+                updateSnapPopCardUI({
+                  stateClass: hasBothDates ? 'state-ok' : 'state-warn',
+                  thumbSrc: createThumbnailDataUrl(cleanCanvas, 200),
+                  badge: hasBothDates ? ('✅ ĐÃ GHI NHẬN TỰ ĐỘNG (' + (i + 1) + '/' + total + ')!') : ('⚠️ ĐÃ GHI NHẬN MÃ & KÝ (' + (i + 1) + '/' + total + ')'),
+                  title: (r.productName || ('Mã ' + r.productCode)) + ' (' + r.productCode + ') — ' + formatKg(r.grams) + ' Kg',
+                  dates: 'NSX: ' + formatLotDateDisplay(r.nsx) + ' • HSD: ' + formatLotDateDisplay(r.hsd),
+                  recordId: r.id,
+                  showRescue: !hasBothDates
+                });
                 renderAll(true);
                 if ((fullOkCount + codeOnlyCount) % 6 === 0) {
                   flushSyncQueue(false);
@@ -4891,99 +4811,31 @@
     }
   }
 
-  function handleSelectedImageFiles(fileList, forceBatchUI) {
+  function handleSelectedImageFiles(fileList) {
     if (!fileList || fileList.length === 0) return;
     const arr = Array.prototype.slice.call(fileList);
-    if (arr.length >= 2 || forceBatchUI || currentMode === 'batch') {
-      processBatchImageFiles(arr);
-      return;
-    }
-    decodeBarcodeFromImageFile(arr[0]);
+    processBatchImageFiles(arr);
   }
 
-  async function decodeBarcodeFromImageFile(file) {
-    if (!file) return;
-    showBanner('warn', '⚡ Đang bắt mã siêu tốc...');
+  function rescueDatesForRecord(recordId) {
+    const rec = recordId
+      ? records.find(function (r) { return r.id === recordId; })
+      : (records.length > 0 ? records[records.length - 1] : null);
+    if (!rec) return;
 
-    try {
-      await warmUpWasmEngine();
-      await ensureNativeBarcodeDetector();
-      warmUpOcrWorker();
-
-      const cleanPack = await loadCleanCanvasFromFile(file, 2400);
-      const cleanCanvas = cleanPack.canvas;
-
-      let hit = await decodePhotoInBrowserWasm(file, cleanCanvas);
-      if (!hit && navigator.onLine && location.protocol.startsWith('http') && (location.port === '8088' || location.port === '8443')) {
-        const srvCode = await decodePhotoViaLocalCppServer(file);
-        if (srvCode) hit = { code: srvCode, position: null };
+    if (cameraActive && mediaStream) {
+      rescueTargetRecordId = rec.id;
+      setShutterUIState('ready');
+      const camCard = document.getElementById('cameraBoxCard');
+      if (camCard && camCard.scrollIntoView) {
+        camCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
-
-      if (hit && hit.code) {
-        // Chốt mã vạch & kêu BÍP ngay lập tức (< 0.08s), tự đọc NSX/HSD ngầm bên dưới không bắt chờ!
-        handleBarcodeInput(hit.code, 'Ảnh chụp', null, {
-          frameCanvas: cleanCanvas,
-          barcodePos: hit.position || null,
-          liveVideo: null,
-          allowTilt: true
-        });
-      } else {
-        // Nếu người dùng chụp cận cảnh chỉ có dòng chữ NSX/HSD -> tự động đọc ngày gắn vào tem vừa quét!
-        const onlyDates = await extractNsxHsdWithTimeout(cleanCanvas, null, 2800, true, cropCenterAimFromCanvas(cleanCanvas));
-        if ((onlyDates.nsx || onlyDates.hsd) && records.length > 0) {
-          const latest = records[records.length - 1];
-          if (onlyDates.nsx) latest.nsx = onlyDates.nsx;
-          if (onlyDates.hsd) latest.hsd = onlyDates.hsd;
-          persistRecords();
-          enqueueOp({ type: 'update', record: toSyncRecord(latest) });
-          renderAll(true);
-          flushSyncQueue();
-          playBeep('ok');
-          showBanner(
-            'ok',
-            '✅ Đã đọc từ ảnh & cập nhật vào tem vừa quét: NSX ' + formatLotDateDisplay(latest.nsx) + ' • HSD ' + formatLotDateDisplay(latest.hsd)
-          );
-          return;
-        }
-        playBeep('error');
-        showBanner('error', 'Không thấy rõ dải mã vạch 13 số trong ảnh. Hãy đưa ống kính rõ nét vào mặt tem rồi chụp lại!');
-      }
-    } catch (err) {
-      playBeep('error');
-      showBanner('error', 'Không đọc được ảnh vừa chọn. Vui lòng thử lại!');
-    }
-  }
-
-  async function rescueDatesForLatestRecord() {
-    if (records.length === 0) return;
-    const targetRec = records[records.length - 1];
-    const video = document.getElementById('cameraVideo');
-
-    // Nếu Camera trực tiếp đang mở -> chụp thẳng từ luồng hình Camera để đọc bù NSX/HSD tức thì (0.25 giây), không bắt mở hộp chọn tệp!
-    if (cameraActive && mediaStream && video && video.readyState >= 2 && video.videoWidth > 0) {
-      showBanner('warn', '⚡ Đang chụp đọc bù NSX & HSD trực tiếp từ Camera...');
-      readingDateRecordIds[targetRec.id] = true;
-      renderAll(false);
-      const snapRescue = captureCleanFullVideoCanvas(video);
-      await fillRecordDatesInBackground(targetRec.id, {
-        frameCanvas: snapRescue,
-        barcodePos: null,
-        rescueAimCropCanvas: cropCenterAimFromCanvas(snapRescue),
-        liveVideo: video,
-        allowTilt: true,
-        ignoreBarcodeMismatch: true
-      });
-      const updated = records.find(function (r) { return r.id === targetRec.id; });
-      if (updated && (updated.nsx || updated.hsd)) {
-        playBeep('ok');
-      } else {
-        playBeep('error');
-        showBanner('error', 'Chưa thấy rõ chữ NSX / HSD trong khung Camera. Đưa dòng chữ NSX / HSD rõ nét vào giữa khung rồi bấm lại!');
-      }
+      showBanner('warn', '🎯 Đưa rõ góc chữ NSX / HSD của "' + (rec.productName || rec.productCode) + '" vào khung rồi bấm nút tròn 📸 CHỤP!');
       return;
     }
 
-    dateOnlyTarget = 'latest';
+    dateOnlyTarget = 'record';
+    dateOnlyTargetRecordId = rec.id;
     document.getElementById('hiddenDateOnlyImageInput').click();
   }
 
@@ -4997,7 +4849,7 @@
       const dates = await extractNsxHsdWithTimeout(
         cleanPack.canvas,
         hitPos,
-        4200,
+        4500,
         true,
         hitPos ? null : cropCenterAimFromCanvas(cleanPack.canvas)
       );
@@ -5012,20 +4864,26 @@
         if (dates.nsx) document.getElementById('editNsxInput').value = dates.nsx;
         if (dates.hsd) document.getElementById('editHsdInput').value = dates.hsd;
         showBanner('ok', '✅ Đã điền tự động NSX: ' + (dates.nsx || '—') + ' • HSD: ' + (dates.hsd || '—'));
-      } else if (dateOnlyTarget === 'pda_lot') {
-        if (dates.nsx) document.getElementById('pdaLotNsxInput').value = dates.nsx;
-        if (dates.hsd) document.getElementById('pdaLotHsdInput').value = dates.hsd;
-        refreshPdaLotClearBtn();
-        showBanner('ok', '✅ Đã gán Lô PDA: NSX ' + (dates.nsx || '—') + ' • HSD ' + (dates.hsd || '—') + ' cho các tem bắn tiếp theo!');
       } else if (records.length > 0) {
-        const latest = records[records.length - 1];
-        if (dates.nsx) latest.nsx = dates.nsx;
-        if (dates.hsd) latest.hsd = dates.hsd;
+        const targetRec = (dateOnlyTarget === 'record' && dateOnlyTargetRecordId)
+          ? (records.find(function (r) { return r.id === dateOnlyTargetRecordId; }) || records[records.length - 1])
+          : records[records.length - 1];
+        if (dates.nsx) targetRec.nsx = dates.nsx;
+        if (dates.hsd) targetRec.hsd = dates.hsd;
         persistRecords();
-        enqueueOp({ type: 'update', record: toSyncRecord(latest) });
+        enqueueOp({ type: 'update', record: toSyncRecord(targetRec) });
         renderAll(true);
         flushSyncQueue(false);
-        showBanner('ok', '✅ Đã cập nhật vào tem vừa quét & đẩy lên Sheet: NSX ' + formatLotDateDisplay(latest.nsx) + ' • HSD ' + formatLotDateDisplay(latest.hsd));
+        updateSnapPopCardUI({
+          stateClass: (targetRec.nsx && targetRec.hsd) ? 'state-ok' : 'state-warn',
+          thumbSrc: createThumbnailDataUrl(cleanPack.canvas, 200),
+          badge: '✅ ĐÃ CẬP NHẬT NSX / HSD & LƯU TỰ ĐỘNG!',
+          title: (targetRec.productName || ('Mã ' + targetRec.productCode)) + ' — ' + formatKg(targetRec.grams) + ' Kg',
+          dates: 'NSX: ' + formatLotDateDisplay(targetRec.nsx) + ' • HSD: ' + formatLotDateDisplay(targetRec.hsd),
+          recordId: targetRec.id,
+          showRescue: !(targetRec.nsx && targetRec.hsd)
+        });
+        showBanner('ok', '✅ Đã cập nhật NSX ' + formatLotDateDisplay(targetRec.nsx) + ' • HSD ' + formatLotDateDisplay(targetRec.hsd) + ' & đẩy lên Sheet!');
       }
     } catch (e) {
       playBeep('error');
@@ -5341,7 +5199,8 @@
 
   async function decodePhotoInBrowserWasm(file, preloadedCleanCanvas) {
     try {
-      const bmp = await loadImageSourceForCanvas(file);
+      const bmp = file ? await loadImageSourceForCanvas(file) : preloadedCleanCanvas;
+      if (!bmp) return null;
       const drawSource = bmp._el || bmp;
       const bw = bmp.width;
       const bh = bmp.height;
@@ -5410,7 +5269,7 @@
       if (fallbackUnverified) return fallbackUnverified;
     } catch (e) {}
 
-    if (window.ZXingWASM && window.ZXingWASM.readBarcodes) {
+    if (file && window.ZXingWASM && window.ZXingWASM.readBarcodes) {
       try {
         const direct = await window.ZXingWASM.readBarcodes(file, WASM_1D_LOCAL_OPTIONS);
         if (direct && direct.length > 0 && direct[0].text) {
@@ -5899,225 +5758,19 @@
   }
 
   // =========================================================================
-  // UI EVENTS, MODES & HARDWARE PDA WEDGE LISTENER
+  // UI EVENTS (DUY NHẤT CHẾ ĐỘ MÁY ẢNH CHỤP 1 CHẠM — KHÔNG NÚT OK XÁC NHẬN)
   // =========================================================================
-  function applyModeUI(mode) {
-    currentMode = mode;
-    document.querySelectorAll('.mode-btn').forEach(function (btn) {
-      btn.classList.toggle('active', btn.dataset.mode === mode);
-    });
-
-    const scanCard = document.getElementById('scanBoxCard');
-    const batchCard = document.getElementById('batchBoxCard');
-    const camCard = document.getElementById('cameraBoxCard');
-    const input = document.getElementById('barcodeInput');
-    const hint = document.getElementById('scanModeHint');
-
-    if (mode === 'camera') {
-      scanCard.style.display = 'none';
-      if (batchCard) batchCard.style.display = 'none';
-      camCard.style.display = 'block';
-      startCamera1DScanner();
-    } else if (mode === 'batch') {
-      stopCamera1DScanner();
-      camCard.style.display = 'none';
-      scanCard.style.display = 'none';
-      if (batchCard) batchCard.style.display = 'block';
-      warmUpWasmEngine();
-      setTimeout(function () { warmUpOcrWorker(); }, 30);
-    } else {
-      stopCamera1DScanner();
-      camCard.style.display = 'none';
-      if (batchCard) batchCard.style.display = 'none';
-      scanCard.style.display = 'block';
-
-      if (mode === 'pda') {
-        input.setAttribute('inputmode', 'none');
-        input.placeholder = 'Bấm nút tia laser PDA để quét tem...';
-        hint.textContent = '🔫 Chế độ PDA: Đã ẩn bàn phím ảo & tự nhận tia quét toàn màn hình';
-        setTimeout(function () { input.focus(); }, 60);
-      } else {
-        input.setAttribute('inputmode', 'numeric');
-        input.placeholder = 'Gõ mã vạch 13 số (VD: 1010040051985)...';
-        hint.textContent = '⌨️ Chế độ Nhập tay: Gõ đủ 13 chữ số trên tem rồi bấm Quét';
-        setTimeout(function () { input.focus(); }, 60);
-      }
-    }
-  }
-
   function bindEvents() {
-    document.querySelectorAll('.mode-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        applyModeUI(btn.dataset.mode);
-      });
-    });
-
     document.querySelectorAll('.zoom-btn').forEach(function (zBtn) {
       zBtn.addEventListener('click', function () {
         applyZoomLevel(Number(zBtn.dataset.zoom));
       });
     });
 
-    const input = document.getElementById('barcodeInput');
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
-        if (pdaBurstTimer) {
-          clearTimeout(pdaBurstTimer);
-          pdaBurstTimer = null;
-        }
-        pdaBurstStartMs = 0;
-        const val = input.value;
-        input.value = '';
-        if (val && val.trim() !== '') {
-          handleBarcodeInput(val, 'Input');
-        }
-      }
-    });
-
-    input.addEventListener('input', function () {
-      const raw = input.value || '';
-      if (raw.indexOf('\n') !== -1 || raw.indexOf('\r') !== -1) {
-        if (pdaBurstTimer) {
-          clearTimeout(pdaBurstTimer);
-          pdaBurstTimer = null;
-        }
-        pdaBurstStartMs = 0;
-        const cleanedLine = raw.replace(/[\r\n]+/g, '').trim();
-        input.value = '';
-        if (cleanedLine) {
-          handleBarcodeInput(cleanedLine, 'PDA Line');
-        }
-        return;
-      }
-
-      if (currentMode === 'pda') {
-        const trimmed = raw.trim();
-        if (trimmed.length === 0) {
-          pdaBurstStartMs = 0;
-          return;
-        }
-        const now = Date.now();
-        if (!pdaBurstStartMs || (now - pdaBurstStartMs > 600 && trimmed.length <= 2)) {
-          pdaBurstStartMs = now;
-        }
-        if (/^\d{13}$/.test(trimmed) && (now - pdaBurstStartMs <= 450)) {
-          if (pdaBurstTimer) clearTimeout(pdaBurstTimer);
-          pdaBurstTimer = setTimeout(function () {
-            pdaBurstTimer = null;
-            pdaBurstStartMs = 0;
-            const captured = input.value.trim();
-            if (captured) {
-              input.value = '';
-              handleBarcodeInput(captured, 'PDA Burst');
-            }
-          }, 60);
-        }
-      }
-    });
-
-    input.addEventListener('paste', function () {
-      setTimeout(function () {
-        if (pdaBurstTimer) {
-          clearTimeout(pdaBurstTimer);
-          pdaBurstTimer = null;
-        }
-        const val = input.value.trim();
-        if (val.length >= 13) {
-          input.value = '';
-          handleBarcodeInput(val, 'Paste');
-        }
-      }, 20);
-    });
-
-    window.addEventListener('paste', function (e) {
-      const activeTag = document.activeElement ? document.activeElement.tagName : '';
-      const activeId = document.activeElement ? document.activeElement.id : '';
-      if ((activeTag === 'INPUT' || activeTag === 'TEXTAREA') && activeId !== 'barcodeInput') {
-        return;
-      }
-      if (activeId === 'barcodeInput') return;
-      const clip = e.clipboardData && e.clipboardData.getData ? e.clipboardData.getData('text') : '';
-      if (clip && /^\d{13}$/.test(clip.trim())) {
-        e.preventDefault();
-        handleBarcodeInput(clip.trim(), 'PDA Paste');
-      }
-    });
-
-    document.getElementById('btnSubmitBarcode').addEventListener('click', function () {
-      if (pdaBurstTimer) {
-        clearTimeout(pdaBurstTimer);
-        pdaBurstTimer = null;
-      }
-      const val = input.value;
-      input.value = '';
-      handleBarcodeInput(val, 'Button');
-      if (currentMode === 'pda') input.focus();
-    });
-
-    // Sự kiện thanh gán NSX / HSD theo lô cho PDA
-    const pdaNsxInp = document.getElementById('pdaLotNsxInput');
-    const pdaHsdInp = document.getElementById('pdaLotHsdInput');
-    if (pdaNsxInp && pdaHsdInp) {
-      pdaNsxInp.addEventListener('input', refreshPdaLotClearBtn);
-      pdaHsdInp.addEventListener('input', refreshPdaLotClearBtn);
-      pdaNsxInp.addEventListener('blur', function () {
-        const c = normalizeDateVN(pdaNsxInp.value);
-        if (c) pdaNsxInp.value = c;
-        refreshPdaLotClearBtn();
-      });
-      pdaHsdInp.addEventListener('blur', function () {
-        const c = normalizeDateVN(pdaHsdInp.value);
-        if (c) pdaHsdInp.value = c;
-        refreshPdaLotClearBtn();
-      });
-    }
-    const btnReadLot = document.getElementById('btnReadLotPhoto');
-    if (btnReadLot) {
-      btnReadLot.addEventListener('click', function () {
-        dateOnlyTarget = 'pda_lot';
-        document.getElementById('hiddenDateOnlyImageInput').click();
-      });
-    }
-    const btnClearLot = document.getElementById('btnClearLotDates');
-    if (btnClearLot) {
-      btnClearLot.addEventListener('click', function () {
-        if (pdaNsxInp) pdaNsxInp.value = '';
-        if (pdaHsdInp) pdaHsdInp.value = '';
-        refreshPdaLotClearBtn();
-        if (currentMode === 'pda') input.focus();
-      });
-    }
-
     window.addEventListener('keydown', function (e) {
-      if (currentMode === 'camera' && (e.code === 'F9' || e.code === 'F10')) {
+      if (e.code === 'F9' || e.code === 'F10') {
         e.preventDefault();
         onShutterScanClick();
-        return;
-      }
-
-      const activeTag = document.activeElement ? document.activeElement.tagName : '';
-      const activeId = document.activeElement ? document.activeElement.id : '';
-      if ((activeTag === 'INPUT' || activeTag === 'TEXTAREA') && activeId !== 'barcodeInput') {
-        return;
-      }
-      if (activeId === 'barcodeInput') {
-        return;
-      }
-
-      const now = Date.now();
-      if (now - wedgeLastKeyTime > 120) {
-        wedgeBuffer = '';
-      }
-      wedgeLastKeyTime = now;
-
-      if (e.key >= '0' && e.key <= '9') {
-        wedgeBuffer += e.key;
-      } else if ((e.key === 'Enter' || e.key === 'Tab') && wedgeBuffer.length >= 8) {
-        e.preventDefault();
-        const captured = wedgeBuffer;
-        wedgeBuffer = '';
-        handleBarcodeInput(captured, 'PDA Laser');
       }
     });
 
@@ -6139,35 +5792,12 @@
 
     document.getElementById('btnShutterScan').addEventListener('click', onShutterScanClick);
     document.getElementById('btnToggleTorch').addEventListener('click', toggleCameraTorch);
-    const btnAutoSnap = document.getElementById('btnToggleAutoSnap');
-    if (btnAutoSnap) {
-      btnAutoSnap.addEventListener('click', function () {
-        settings.autoSnapCamera = !settings.autoSnapCamera;
-        if (settings.autoSnapCamera) {
-          const latestR = records.length > 0 ? records[records.length - 1] : null;
-          if (!latestR || (latestR.nsx && latestR.hsd)) {
-            lastAutoSnappedCode = '';
-            lastAutoSnappedEpoch = 0;
-          }
-        }
-        saveSettings();
-        refreshAutoSnapBtnUI();
-        if (cameraActive && !singleScanActive) {
-          setShutterUIState('ready');
-        }
-        showBanner(
-          'ok',
-          settings.autoSnapCamera
-            ? '⚡ Đã BẬT Tự chốt: Đưa tem vào khung là máy tự quét luôn không cần bấm nút!'
-            : '📸 Đã TẮT Tự chốt: Đưa tem vào khung rồi bấm nút tròn để quét từng tem.'
-        );
-      });
-    }
+
     const camVideoEl = document.getElementById('cameraVideo');
     if (camVideoEl) {
-      camVideoEl.addEventListener('click', function () {
+      camVideoEl.addEventListener('click', function (ev) {
         if (cameraActive) {
-          triggerCameraRefocus();
+          triggerCameraRefocus(ev);
         }
       });
     }
@@ -6175,29 +5805,10 @@
     if (btnSwitchLens) {
       btnSwitchLens.addEventListener('click', cycleRearCameraLens);
     }
-    const btnQuickBatchJump = document.getElementById('btnQuickBatchJump');
-    if (btnQuickBatchJump) {
-      btnQuickBatchJump.addEventListener('click', function () {
-        applyModeUI('batch');
-        document.getElementById('batchGalleryInput').click();
-      });
-    }
     const btnPickBatch = document.getElementById('btnPickBatchPhotos');
     if (btnPickBatch) {
       btnPickBatch.addEventListener('click', function () {
         document.getElementById('batchGalleryInput').click();
-      });
-    }
-    const btnNativeSingle = document.getElementById('btnNativeCameraSingle');
-    if (btnNativeSingle) {
-      btnNativeSingle.addEventListener('click', function () {
-        document.getElementById('nativeCameraSnapInput').click();
-      });
-    }
-    const btnCamNativeSnap = document.getElementById('btnCamNativeSnap');
-    if (btnCamNativeSnap) {
-      btnCamNativeSnap.addEventListener('click', function () {
-        document.getElementById('nativeCameraSnapInput').click();
       });
     }
     const btnCancelBatch = document.getElementById('btnCancelBatch');
@@ -6207,32 +5818,11 @@
       });
     }
 
-    document.getElementById('btnPickImage').addEventListener('click', function () {
-      document.getElementById('hiddenImageInput').click();
-    });
-    document.getElementById('btnQuickPhotoScan').addEventListener('click', function () {
-      document.getElementById('hiddenImageInput').click();
-    });
-    document.getElementById('hiddenImageInput').addEventListener('change', function (e) {
-      if (e.target.files && e.target.files.length > 0) {
-        handleSelectedImageFiles(e.target.files, false);
-      }
-      e.target.value = '';
-    });
     const batchInp = document.getElementById('batchGalleryInput');
     if (batchInp) {
       batchInp.addEventListener('change', function (e) {
         if (e.target.files && e.target.files.length > 0) {
-          handleSelectedImageFiles(e.target.files, true);
-        }
-        e.target.value = '';
-      });
-    }
-    const nativeSnapInp = document.getElementById('nativeCameraSnapInput');
-    if (nativeSnapInp) {
-      nativeSnapInp.addEventListener('change', function (e) {
-        if (e.target.files && e.target.files.length > 0) {
-          handleSelectedImageFiles(e.target.files, currentMode === 'batch');
+          handleSelectedImageFiles(e.target.files);
         }
         e.target.value = '';
       });
@@ -6267,9 +5857,9 @@
         if (kpiSec) {
           kpiSec.style.display = (target === 'tabSettings' || target === 'tabCatalog') ? 'none' : 'grid';
         }
-        if (target !== 'tabScan' && currentMode === 'camera') {
+        if (target !== 'tabScan') {
           stopCamera1DScanner();
-        } else if (target === 'tabScan' && currentMode === 'camera') {
+        } else {
           startCamera1DScanner();
         }
       });
@@ -6294,12 +5884,12 @@
     });
 
     document.getElementById('btnSaveEdit').addEventListener('click', saveEditedRecord);
-    document.getElementById('btnOpenManualAdd').addEventListener('click', function () {
-      openEditModal(null);
-    });
-    document.getElementById('btnOpenManualAdd2').addEventListener('click', function () {
-      openEditModal(null);
-    });
+    const btnOpenAdd2 = document.getElementById('btnOpenManualAdd2');
+    if (btnOpenAdd2) {
+      btnOpenAdd2.addEventListener('click', function () {
+        openEditModal(null);
+      });
+    }
 
     document.getElementById('btnConfirmDuplicate').addEventListener('click', function () {
       const code = pendingDuplicateCode;
@@ -6351,12 +5941,12 @@
         const rawUrl = String((sheetUrlInputEl && sheetUrlInputEl.value) || settings.sheetWebAppUrl || '').trim();
         if (!rawUrl) return;
         const baseClean = window.location.origin + window.location.pathname;
-        const teamLink = baseClean + '?sheet=' + encodeURIComponent(rawUrl) + '#camera';
+        const teamLink = baseClean + '?sheet=' + encodeURIComponent(rawUrl);
         navigator.clipboard.writeText(teamLink).then(function () {
-          showBanner('ok', '✅ Đã sao chép Link dùng chung! Gửi qua Zalo cho ĐT/PDA nào cũng quét & tự đồng bộ được!');
+          showBanner('ok', '✅ Đã sao chép Link dùng chung! Gửi qua Zalo cho điện thoại nào cũng chụp & tự đồng bộ được!');
           copyTeamBtn.textContent = '✅ Đã sao chép Link dùng chung!';
           setTimeout(function () {
-            copyTeamBtn.textContent = '🔗 Sao chép Link dùng chung cho mọi ĐT & PDA';
+            copyTeamBtn.textContent = '🔗 Sao chép Link dùng chung cho mọi ĐT';
           }, 3000);
         });
       });
@@ -6373,7 +5963,7 @@
         saveSettings();
         alert(
           'Đường link "docs.google.com/spreadsheets/..." bạn vừa dán là link MỞ XEM bảng tính (hệ thống đã tự lưu vào ô Link mở xem bên dưới).\n\n' +
-          'Để tự động ghi dữ liệu quét vào bảng tính, bạn cần dán đường link có đuôi "/exec" (bắt đầu bằng https://script.google.com/macros/s/.../exec)!'
+          'Để tự động ghi dữ liệu vào bảng tính, bạn cần dán đường link có đuôi "/exec" (bắt đầu bằng https://script.google.com/macros/s/.../exec)!'
         );
         return;
       }
@@ -6414,6 +6004,8 @@
       persistRecords();
       enqueueOp({ type: 'clear_all' });
       renderAll(false);
+      const pop = document.getElementById('snapPopCard');
+      if (pop) pop.style.display = 'none';
       showBanner('ok', 'Đã xóa sạch làm mới phiên kiểm tồn về 0!');
       flushSyncQueue();
     }
@@ -6473,6 +6065,7 @@
   window.AppActions = {
     edit: function (id) { openEditModal(id); },
     del: function (id) { confirmDeleteRecord(id); },
+    rescueDates: function (id) { rescueDatesForRecord(id); },
     editCatalog: function (code) {
       const cur = getProductNameOrNull(code) || '';
       const next = prompt('Sửa tên hiển thị cho mã ' + code + ':', cur);
@@ -6490,12 +6083,6 @@
 
   function closeModal(id) {
     document.getElementById(id).classList.remove('open');
-    if (currentMode === 'pda') {
-      setTimeout(function () {
-        const inp = document.getElementById('barcodeInput');
-        if (inp) inp.focus();
-      }, 60);
-    }
   }
 
   function showBanner(type, message) {
