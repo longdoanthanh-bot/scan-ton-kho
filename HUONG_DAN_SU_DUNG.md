@@ -1,4 +1,4 @@
-# 📦 HƯỚNG DẪN SỬ DỤNG APP QUÉT TỒN KHO TEM MÃ VẠCH — BẢN v13 SIÊU TỐC
+# 📦 HƯỚNG DẪN SỬ DỤNG APP QUÉT TỒN KHO TEM MÃ VẠCH — BẢN v14 SIÊU TỐC
 
 Ứng dụng quét **dải mã vạch sọc 13 số** kết hợp **tự động đọc Ngày sản xuất (NSX) & Hạn sử dụng (HSD)** trên tem cân (ví dụ: `1010040051985` → Mã sản phẩm `10040` - *Chân giò heo trước*, Khối lượng `5.198 Kg`, `NSX: 12/11/2026`, `HSD: 15/11/2026`), **khóa cứng không quét nhầm ô vuông ở góc tem**, hoạt động **100% cả khi mất mạng** và **tự động đồng bộ 2 chiều với Google Sheet `SCAN TỒN`**.
 
