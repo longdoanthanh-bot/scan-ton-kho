@@ -1,7 +1,8 @@
 /**
  * ============================================================================
- * BỘ KẾT NỐI TỰ ĐỘNG 2 CHIỀU APP QUÉT TỒN KHO <-> GOOGLE SHEET (v10)
- * Hỗ trợ tự động đọc NSX & HSD + Báo cáo Tổng hợp Tồn đa chiều (Theo SKU × Date, Gộp Theo SKU, Gộp Theo Date)
+ * BỘ KẾT NỐI TỰ ĐỘNG 2 CHIỀU APP QUÉT TỒN KHO <-> GOOGLE SHEET (v11)
+ * Hỗ trợ trường tùy chọn Barcode Khách Hàng (có thể bỏ qua không bắt buộc)
+ * + Tự động đọc NSX & HSD + Báo cáo Tổng hợp Tồn 4 chiều (SKU × Date, Theo SKU, Theo Date, Theo Khách hàng)
  * + Đồng bộ tức thì khi xóa/sửa dòng trực tiếp trên Sheet
  * ============================================================================
  * - Google Sheet gắn cố định: https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0
@@ -14,7 +15,7 @@ const SHEET_CHI_TIET = 'Chi_Tiet_Scan';
 const SHEET_TONG_HOP = 'Tong_Hop_Ton';
 const SHEET_DANH_MUC = 'Danh_Muc_SP';
 const APP_ONLINE_URL = 'https://longdoanthanh-bot.github.io/scan-ton-kho/';
-const SCRIPT_VERSION = 'v10_sku_date_summary';
+const SCRIPT_VERSION = 'v11_customer_barcode';
 
 function getTargetSpreadsheet() {
   try {
@@ -28,7 +29,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('📦 Quản Lý Quét Tồn')
     .addItem('1. Khởi tạo / Chuẩn hóa các trang bảng tính', 'initAllSheets')
-    .addItem('2. Tính toán & Làm mới lại bảng Tổng hợp (Theo SKU & Date)', 'rebuildTotalsAndSummary')
+    .addItem('2. Tính toán & Làm mới lại bảng Tổng hợp (SKU • Date • Khách hàng)', 'rebuildTotalsAndSummary')
     .addToUi();
 }
 
@@ -55,12 +56,17 @@ function sheetNeedsSelfHeal(ss, parsedRecords) {
     const shSum = ss.getSheetByName(SHEET_TONG_HOP);
     if (!shDetail || !shSum) return false;
 
+    const col2Title = String(shDetail.getRange(1, 2).getDisplayValue() || '').trim();
+    if (col2Title !== 'Barcode khách hàng') {
+      return true;
+    }
+
     const physicalRows = Math.max(0, shDetail.getLastRow() - 1);
     if (physicalRows !== parsedRecords.length) {
       return true;
     }
     if (parsedRecords.length > 0) {
-      const lastSeq = Number(shDetail.getRange(parsedRecords.length + 1, 7).getValue());
+      const lastSeq = Number(shDetail.getRange(parsedRecords.length + 1, 8).getValue());
       if (lastSeq !== parsedRecords.length) {
         return true;
       }
@@ -70,7 +76,7 @@ function sheetNeedsSelfHeal(ss, parsedRecords) {
       return true;
     }
     const sumBanner = String(shSum.getRange('A1').getValue() || '');
-    if (sumBanner.indexOf('THEO SKU & THEO DATE') === -1) {
+    if (sumBanner.indexOf('KHÁCH HÀNG') === -1) {
       return true;
     }
     return false;
@@ -103,6 +109,7 @@ function doGet(e) {
         const lock = LockService.getScriptLock();
         if (lock.tryLock(8000)) {
           try {
+            ensureSheetsExist(ss);
             rebuildTotalsAndSummaryInternal(ss);
             recs = readAllScanRecords(ss);
           } finally {
@@ -126,7 +133,7 @@ function doGet(e) {
       return jsonResponse({
         ok: true,
         version: SCRIPT_VERSION,
-        message: 'Kết nối 2 chiều Google Sheet Quét Tồn Kho (Theo SKU & Theo Date NSX/HSD) đang hoạt động tốt!',
+        message: 'Kết nối 2 chiều Google Sheet Quét Tồn Kho (Hỗ trợ Barcode Khách Hàng tùy chọn + SKU & Date) đang hoạt động tốt!',
         sheetName: ss.getName(),
         sheetUrl: ss.getUrl()
       });
@@ -140,7 +147,7 @@ function doGet(e) {
       '.btn{display:block;padding:12px 16px;margin-top:10px;border-radius:10px;text-decoration:none;font-weight:700;color:#fff;background:#0284c7}',
       '.btn.g{background:#15803d}</style></head><body><div class="box">',
       '<h2 style="margin:0 0 8px;color:#0f2942">✅ Cổng Đồng Bộ 2 Chiều Google Sheet Đang Hoạt Động</h2>',
-      '<p style="font-size:14px;color:#475569">Đã kết nối trực tiếp bảng tính <strong>' + ss.getName() + '</strong> (Tự động lưu Mã SKU, Số Ký, NSX, HSD, Tổng hợp theo SKU & Date và đồng bộ ngược khi xóa/sửa dòng trên Sheet).</p>',
+      '<p style="font-size:14px;color:#475569">Đã kết nối trực tiếp bảng tính <strong>' + ss.getName() + '</strong> (Hỗ trợ Barcode Khách hàng tùy chọn, Mã SKU, Số Ký, NSX, HSD, Tổng hợp 4 chiều và đồng bộ ngược khi xóa/sửa dòng trên Sheet).</p>',
       '<a class="btn g" href="' + APP_ONLINE_URL + '" target="_top">📷 Mở Ứng Dụng Quét Tồn Kho</a>',
       '<a class="btn" href="' + ss.getUrl() + '" target="_blank">📊 Mở Bảng Tính Google Sheet</a>',
       '</div></body></html>'
@@ -234,6 +241,7 @@ function rebuildTotalsAndSummary() {
 function formatDetailHeader(shDetail) {
   const headers = [[
     'Ngày giờ scan',
+    'Barcode khách hàng',
     'Tên sản phẩm',
     'Mã sản phẩm',
     'Số ký tem vừa scan',
@@ -245,7 +253,7 @@ function formatDetailHeader(shDetail) {
     'Mã vạch gốc / Ghi chú',
     'Mã dòng đồng bộ'
   ]];
-  shDetail.getRange(1, 1, 1, 11).setValues(headers)
+  shDetail.getRange(1, 1, 1, 12).setValues(headers)
     .setBackground('#1B365D')
     .setFontColor('#FFFFFF')
     .setFontWeight('bold')
@@ -253,7 +261,7 @@ function formatDetailHeader(shDetail) {
     .setVerticalAlignment('middle');
   shDetail.setFrozenRows(1);
   shDetail.setRowHeight(1, 36);
-  const widths = [160, 235, 110, 145, 115, 115, 150, 175, 150, 205, 150];
+  const widths = [155, 165, 230, 110, 145, 115, 115, 145, 170, 145, 200, 150];
   for (let c = 0; c < widths.length; c++) {
     shDetail.setColumnWidth(c + 1, widths[c]);
   }
@@ -293,11 +301,14 @@ function ensureSheetsExist(ss) {
   if (shDetail.getLastRow() === 0) {
     formatDetailHeader(shDetail);
   } else {
+    const col2Title = String(shDetail.getRange(1, 2).getDisplayValue() || '').trim();
     const col5Title = String(shDetail.getRange(1, 5).getDisplayValue() || '').trim();
-    if (col5Title !== 'NSX') {
-      const legacyRecords = readLegacy9ColRecords(shDetail);
+    if (col2Title !== 'Barcode khách hàng') {
+      const migratedRecords = (col5Title === 'NSX')
+        ? readLegacy11ColRecords(shDetail)
+        : readLegacy9ColRecords(shDetail);
       formatDetailHeader(shDetail);
-      writeAllScanRecords(ss, legacyRecords);
+      writeAllScanRecords(ss, migratedRecords);
       rebuildTotalsAndSummaryInternal(ss);
     }
   }
@@ -319,6 +330,7 @@ function readLegacy9ColRecords(sh) {
     out.push({
       id: String(row[8] || ('row_' + (i + 2))),
       scannedAt: String(row[0] || ''),
+      customerBarcode: '',
       productName: String(row[1] || '—'),
       productCode: code,
       grams: grams,
@@ -330,6 +342,43 @@ function readLegacy9ColRecords(sh) {
     });
   }
   return out;
+}
+
+function readLegacy11ColRecords(sh) {
+  const lastRow = sh.getLastRow();
+  if (lastRow <= 1) return [];
+  const values = sh.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
+  const out = [];
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    const code = String(row[2] || '').trim();
+    const rawKg = String(row[3] || '').replace(/,/g, '').trim();
+    const grams = Math.round(parseFloat(rawKg || '0') * 1000);
+    if ((!code && !String(row[0] || '').trim()) || isNaN(grams) || grams <= 0) {
+      continue;
+    }
+    const parts = String(row[9] || '').split(' | ');
+    out.push({
+      id: String(row[10] || '').trim() || ('sheet_row_' + (i + 2) + '_' + code + '_' + grams),
+      scannedAt: String(row[0] || '').trim(),
+      customerBarcode: '',
+      productName: String(row[1] || '—').trim() || '—',
+      productCode: code,
+      grams: grams,
+      weightKg: grams / 1000,
+      nsx: cleanDateField(row[4]),
+      hsd: cleanDateField(row[5]),
+      rawBarcode: (parts[0] || '').trim(),
+      note: parts.slice(1).join(' | ').trim()
+    });
+  }
+  return out;
+}
+
+function cleanCustomerField(v) {
+  const s = String(v || '').replace(/[\r\n\t]+/g, ' ').trim();
+  if (!s || s === '—' || s === '-' || s === 'null' || s === 'undefined') return '';
+  return s.slice(0, 64);
 }
 
 function cleanDateField(v) {
@@ -443,11 +492,15 @@ function applyOperations(ss, ops) {
         continue;
       }
       const grams = Math.round(Number(r.grams !== undefined ? r.grams : Math.round(Number(r.weightKg) * 1000)));
+      const incomingCust = (r.customerBarcode !== undefined)
+        ? cleanCustomerField(r.customerBarcode)
+        : (prev ? cleanCustomerField(prev.customerBarcode) : '');
       const incomingNsx = (r.nsx !== undefined) ? cleanDateField(r.nsx) : (prev ? prev.nsx : '');
       const incomingHsd = (r.hsd !== undefined) ? cleanDateField(r.hsd) : (prev ? prev.hsd : '');
       const cleanRec = {
         id: String(r.id),
         scannedAt: String(r.scannedAt || (prev ? prev.scannedAt : '')),
+        customerBarcode: incomingCust,
         productName: (r.productName && String(r.productName).trim() !== '') ? String(r.productName).trim() : '—',
         productCode: String(r.productCode || '').trim(),
         grams: grams,
@@ -476,32 +529,34 @@ function readAllScanRecords(ss) {
   const lastRow = sh.getLastRow();
   if (lastRow <= 1) return [];
 
+  const col2Title = String(sh.getRange(1, 2).getDisplayValue() || '').trim();
   const col5Title = String(sh.getRange(1, 5).getDisplayValue() || '').trim();
-  if (col5Title !== 'NSX') {
-    return readLegacy9ColRecords(sh);
+  if (col2Title !== 'Barcode khách hàng') {
+    return (col5Title === 'NSX') ? readLegacy11ColRecords(sh) : readLegacy9ColRecords(sh);
   }
 
-  const values = sh.getRange(2, 1, lastRow - 1, 11).getDisplayValues();
+  const values = sh.getRange(2, 1, lastRow - 1, 12).getDisplayValues();
   const out = [];
   for (let i = 0; i < values.length; i++) {
     const row = values[i];
-    const code = String(row[2] || '').trim();
-    const rawKg = String(row[3] || '').replace(/,/g, '').trim();
+    const code = String(row[3] || '').trim();
+    const rawKg = String(row[4] || '').replace(/,/g, '').trim();
     const grams = Math.round(parseFloat(rawKg || '0') * 1000);
     // Nếu người dùng xóa dòng hoặc bôi đen bấm Delete xóa Mã SP / Số ký trên Sheet -> ghi nhận dòng đó đã bị xóa!
     if ((!code && !String(row[0] || '').trim()) || isNaN(grams) || grams <= 0) {
       continue;
     }
-    const parts = String(row[9] || '').split(' | ');
+    const parts = String(row[10] || '').split(' | ');
     out.push({
-      id: String(row[10] || '').trim() || ('sheet_row_' + (i + 2) + '_' + code + '_' + grams),
+      id: String(row[11] || '').trim() || ('sheet_row_' + (i + 2) + '_' + code + '_' + grams),
       scannedAt: String(row[0] || '').trim(),
-      productName: String(row[1] || '—').trim() || '—',
+      customerBarcode: cleanCustomerField(row[1]),
+      productName: String(row[2] || '—').trim() || '—',
       productCode: code,
       grams: grams,
       weightKg: grams / 1000,
-      nsx: cleanDateField(row[4]),
-      hsd: cleanDateField(row[5]),
+      nsx: cleanDateField(row[5]),
+      hsd: cleanDateField(row[6]),
       rawBarcode: (parts[0] || '').trim(),
       note: parts.slice(1).join(' | ').trim()
     });
@@ -512,7 +567,7 @@ function readAllScanRecords(ss) {
 function writeAllScanRecords(ss, records) {
   const sh = ss.getSheetByName(SHEET_CHI_TIET);
   const lastRow = sh.getLastRow();
-  const maxCol = Math.max(11, sh.getLastColumn());
+  const maxCol = Math.max(12, sh.getLastColumn());
   if (lastRow > 1) {
     sh.getRange(2, 1, lastRow - 1, maxCol).clearContent();
   }
@@ -525,6 +580,7 @@ function writeAllScanRecords(ss, records) {
 
   for (let i = 0; i < records.length; i++) {
     const r = records[i];
+    const custDisp = cleanCustomerField(r.customerBarcode) || '—';
     const code = String(r.productCode || '').trim();
     const name = (r.productName && String(r.productName).trim() !== '') ? String(r.productName).trim() : '—';
     const grams = Math.round(Number(r.grams !== undefined ? r.grams : Math.round(Number(r.weightKg || 0) * 1000)));
@@ -543,6 +599,7 @@ function writeAllScanRecords(ss, records) {
 
     rows.push([
       String(r.scannedAt || ''),
+      custDisp,
       name,
       code,
       grams / 1000,
@@ -556,18 +613,19 @@ function writeAllScanRecords(ss, records) {
     ]);
   }
 
-  sh.getRange(2, 1, rows.length, 1).setNumberFormat('@');
-  sh.getRange(2, 3, rows.length, 1).setNumberFormat('@');
-  sh.getRange(2, 5, rows.length, 2).setNumberFormat('@');
-  sh.getRange(2, 10, rows.length, 2).setNumberFormat('@');
+  sh.getRange(2, 1, rows.length, 2).setNumberFormat('@');
+  sh.getRange(2, 4, rows.length, 1).setNumberFormat('@');
+  sh.getRange(2, 6, rows.length, 2).setNumberFormat('@');
+  sh.getRange(2, 11, rows.length, 2).setNumberFormat('@');
 
-  sh.getRange(2, 1, rows.length, 11).setValues(rows);
+  sh.getRange(2, 1, rows.length, 12).setValues(rows);
 
-  sh.getRange(2, 4, rows.length, 1).setNumberFormat('#,##0.000');
-  sh.getRange(2, 7, rows.length, 2).setNumberFormat('#,##0');
-  sh.getRange(2, 9, rows.length, 1).setNumberFormat('#,##0.000');
-  sh.getRange(2, 3, rows.length, 1).setHorizontalAlignment('center');
-  sh.getRange(2, 5, rows.length, 4).setHorizontalAlignment('center');
+  sh.getRange(2, 5, rows.length, 1).setNumberFormat('#,##0.000');
+  sh.getRange(2, 8, rows.length, 2).setNumberFormat('#,##0');
+  sh.getRange(2, 10, rows.length, 1).setNumberFormat('#,##0.000');
+  sh.getRange(2, 2, rows.length, 1).setHorizontalAlignment('center');
+  sh.getRange(2, 4, rows.length, 1).setHorizontalAlignment('center');
+  sh.getRange(2, 6, rows.length, 4).setHorizontalAlignment('center');
 }
 
 function rebuildTotalsAndSummaryInternal(ss) {
@@ -578,11 +636,16 @@ function rebuildTotalsAndSummaryInternal(ss) {
   const bySku = {};
   const byDate = {};
   const bySkuDate = {};
+  const byCustomer = {};
   const knownDateKeyMap = {};
+  const knownCustomerMap = {};
   let totalGrams = 0;
 
   for (let i = 0; i < records.length; i++) {
     const r = records[i];
+    const custClean = cleanCustomerField(r.customerBarcode);
+    const custDisp = custClean || '—';
+    const hasCustomer = Boolean(custClean !== '');
     const codeKey = String(r.productCode || '').trim() || 'CHUA_RO';
     const dispCode = String(r.productCode || '').trim() || '—';
     const dispName = (r.productName && r.productName !== '—') ? String(r.productName).trim() : '—';
@@ -598,6 +661,9 @@ function rebuildTotalsAndSummaryInternal(ss) {
     totalGrams += g;
     if (hasAnyDate) {
       knownDateKeyMap[datePairKey] = true;
+    }
+    if (hasCustomer) {
+      knownCustomerMap[custClean] = true;
     }
 
     // 1. Nhóm theo SKU × Date (NSX / HSD)
@@ -681,6 +747,37 @@ function rebuildTotalsAndSummaryInternal(ss) {
     }
     byDate[datePairKey].skuBreakdown[codeKey].count += 1;
     byDate[datePairKey].skuBreakdown[codeKey].grams += g;
+
+    // 4. Nhóm gộp theo Barcode Khách hàng (tùy chọn — bỏ qua thì gom về '—')
+    const custKey = hasCustomer ? ('KH_' + custClean) : '__SKIPPED__';
+    if (!byCustomer[custKey]) {
+      byCustomer[custKey] = {
+        customer: custDisp,
+        hasCustomer: hasCustomer,
+        count: 0,
+        grams: 0,
+        dateLots: {},
+        skuBreakdown: {}
+      };
+    }
+    byCustomer[custKey].count += 1;
+    byCustomer[custKey].grams += g;
+    if (hasAnyDate) {
+      byCustomer[custKey].dateLots[datePairKey] = true;
+    }
+    if (!byCustomer[custKey].skuBreakdown[codeKey]) {
+      byCustomer[custKey].skuBreakdown[codeKey] = {
+        code: dispCode,
+        name: dispName,
+        count: 0,
+        grams: 0
+      };
+    }
+    if (byCustomer[custKey].skuBreakdown[codeKey].name === '—' && dispName !== '—') {
+      byCustomer[custKey].skuBreakdown[codeKey].name = dispName;
+    }
+    byCustomer[custKey].skuBreakdown[codeKey].count += 1;
+    byCustomer[custKey].skuBreakdown[codeKey].grams += g;
   }
 
   // Sắp xếp Bảng 1 (Theo SKU × Date): theo Mã SKU tăng dần, cùng SKU ưu tiên HSD gần nhất lên đầu (FEFO), chưa rõ date xếp cuối
@@ -708,19 +805,29 @@ function rebuildTotalsAndSummaryInternal(ss) {
     return b.grams - a.grams;
   });
 
+  // Sắp xếp Bảng 4 (Gộp Theo Barcode Khách hàng): ưu tiên dòng có gán KH lên đầu theo số ký giảm dần, dòng bỏ qua ('—') xếp cuối
+  const customerList = Object.keys(byCustomer).map(function (k) { return byCustomer[k]; });
+  customerList.sort(function (a, b) {
+    if (a.hasCustomer !== b.hasCustomer) return a.hasCustomer ? -1 : 1;
+    if (b.grams !== a.grams) return b.grams - a.grams;
+    return String(a.customer).localeCompare(String(b.customer));
+  });
+
   const totalScans = records.length;
   const totalProducts = skuList.length;
   const knownDateLotsCount = Object.keys(knownDateKeyMap).length;
+  const knownCustomerCount = Object.keys(knownCustomerMap).length;
   const totalKg = totalGrams / 1000;
 
-  // Cầu dao tự ngắt KCS kiểm tra chéo tổng số tem & tổng số ký giữa cả 3 chiều báo cáo
-  let chk1Cnt = 0, chk1G = 0, chk2Cnt = 0, chk2G = 0, chk3Cnt = 0, chk3G = 0;
+  // Cầu dao tự ngắt KCS kiểm tra chéo tổng số tem & tổng số ký giữa cả 4 chiều báo cáo
+  let chk1Cnt = 0, chk1G = 0, chk2Cnt = 0, chk2G = 0, chk3Cnt = 0, chk3G = 0, chk4Cnt = 0, chk4G = 0;
   for (let i = 0; i < skuDateList.length; i++) { chk1Cnt += skuDateList[i].count; chk1G += skuDateList[i].grams; }
   for (let i = 0; i < skuList.length; i++) { chk2Cnt += skuList[i].count; chk2G += skuList[i].grams; }
   for (let i = 0; i < dateList.length; i++) { chk3Cnt += dateList[i].count; chk3G += dateList[i].grams; }
-  if (chk1Cnt !== totalScans || chk2Cnt !== totalScans || chk3Cnt !== totalScans ||
-      chk1G !== totalGrams || chk2G !== totalGrams || chk3G !== totalGrams) {
-    throw new Error('KCS FAIL: Lệch số liệu đối chiếu chéo giữa 3 chiều tổng hợp SKU × Date!');
+  for (let i = 0; i < customerList.length; i++) { chk4Cnt += customerList[i].count; chk4G += customerList[i].grams; }
+  if (chk1Cnt !== totalScans || chk2Cnt !== totalScans || chk3Cnt !== totalScans || chk4Cnt !== totalScans ||
+      chk1G !== totalGrams || chk2G !== totalGrams || chk3G !== totalGrams || chk4G !== totalGrams) {
+    throw new Error('KCS FAIL: Lệch số liệu đối chiếu chéo giữa 4 chiều tổng hợp SKU × Date × Khách hàng!');
   }
 
   const shSum = ss.getSheetByName(SHEET_TONG_HOP);
@@ -728,7 +835,7 @@ function rebuildTotalsAndSummaryInternal(ss) {
 
   // Tiêu đề & Thời gian cập nhật (Cột A..I)
   shSum.getRange('A1:I1').merge()
-    .setValue('BÁO CÁO TỔNG HỢP TỒN KHO QUÉT TEM MÃ VẠCH (THEO SKU & THEO DATE)')
+    .setValue('BÁO CÁO TỔNG HỢP TỒN KHO QUÉT TEM MÃ VẠCH (THEO SKU & THEO DATE & KHÁCH HÀNG)')
     .setBackground('#1B365D')
     .setFontColor('#FFFFFF')
     .setFontSize(13)
@@ -738,7 +845,11 @@ function rebuildTotalsAndSummaryInternal(ss) {
   shSum.setRowHeight(1, 38);
 
   shSum.getRange('A2:I2').merge()
-    .setValue('Cập nhật mới nhất: ' + formatDateTimeVN(new Date()) + ' • Tự động đối soát 3 chiều: Theo SKU × Date | Gộp Theo SKU | Gộp Theo Date')
+    .setValue(
+      'Cập nhật mới nhất: ' + formatDateTimeVN(new Date()) +
+      ' • Tự động đối soát 4 chiều: SKU × Date | Theo SKU | Theo Date | Theo Khách hàng (' +
+      (knownCustomerCount > 0 ? (knownCustomerCount + ' mã KH') : 'Chưa gán KH') + ')'
+    )
     .setBackground('#EEF2F6')
     .setFontColor('#334155')
     .setHorizontalAlignment('center');
@@ -1026,11 +1137,98 @@ function rebuildTotalsAndSummaryInternal(ss) {
     shSum.getRange(curRow, 5, 1, 2).setNumberFormat('#,##0');
     shSum.getRange(curRow, 7, 1, 1).setNumberFormat('#,##0.000');
     shSum.getRange(curRow, 8, 1, 1).setNumberFormat('0.0%');
+    curRow += 2;
   } else {
     shSum.getRange(curRow, 1, 1, 9).merge().setValue('Chưa có dữ liệu tổng hợp theo Date.').setHorizontalAlignment('center').setFontColor('#64748B');
+    curRow += 2;
   }
 
-  const sumWidths = [55, 120, 235, 165, 125, 165, 150, 135, 360];
+  // =========================================================================
+  // BẢNG 4: TỔNG HỢP TỒN GỘP THEO BARCODE KHÁCH HÀNG (TÙY CHỌN — CÓ THỂ BỎ QUA)
+  // =========================================================================
+  shSum.getRange(curRow, 1, 1, 9).merge()
+    .setValue('IV. TỔNG HỢP TỒN GỘP THEO BARCODE KHÁCH HÀNG (TÙY CHỌN — DÒNG BỎ QUA HIỂN THỊ "—")')
+    .setBackground('#7C2D12')
+    .setFontColor('#FFFFFF')
+    .setFontSize(11)
+    .setFontWeight('bold')
+    .setVerticalAlignment('middle');
+  shSum.setRowHeight(curRow, 30);
+  curRow += 1;
+
+  shSum.getRange(curRow, 1, 1, 9).setValues([[
+    'STT',
+    'Barcode khách hàng',
+    'Phân loại gán KH',
+    'Số mã SKU',
+    'Số lô Date',
+    'Tổng số tem',
+    'Tổng số ký (Kg)',
+    'Tỷ trọng KL (%)',
+    'Chi tiết các SKU thuộc Khách hàng này'
+  ]]).setBackground('#1B365D').setFontColor('#FFFFFF').setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
+  shSum.setRowHeight(curRow, 30);
+  curRow += 1;
+
+  if (customerList.length > 0) {
+    const rows4 = [];
+    for (let i = 0; i < customerList.length; i++) {
+      const cg = customerList[i];
+      const kg = cg.grams / 1000;
+      const share = totalGrams > 0 ? (cg.grams / totalGrams) : 0;
+      const sItems = Object.keys(cg.skuBreakdown).map(function (k) { return cg.skuBreakdown[k]; });
+      sItems.sort(function (a, b) { return b.grams - a.grams; });
+      const skuParts = [];
+      for (let sIdx = 0; sIdx < sItems.length; sIdx++) {
+        const si = sItems[sIdx];
+        skuParts.push(si.code + ' - ' + si.name + ' (' + si.count + ' tem • ' + (si.grams / 1000).toFixed(3) + ' Kg)');
+      }
+      const dateLotCnt = Object.keys(cg.dateLots).length;
+      rows4.push([
+        i + 1,
+        cg.hasCustomer ? String(cg.customer) : '—',
+        cg.hasCustomer ? 'Đã quét mã KH' : '— (Bỏ qua mã KH)',
+        sItems.length,
+        dateLotCnt > 0 ? (dateLotCnt + ' lô date') : '—',
+        cg.count,
+        kg,
+        share,
+        skuParts.join('; ')
+      ]);
+    }
+    shSum.getRange(curRow, 2, rows4.length, 2).setNumberFormat('@');
+    shSum.getRange(curRow, 5, rows4.length, 1).setNumberFormat('@');
+    shSum.getRange(curRow, 9, rows4.length, 1).setNumberFormat('@').setWrap(true);
+    shSum.getRange(curRow, 1, rows4.length, 9).setValues(rows4).setVerticalAlignment('middle');
+    shSum.getRange(curRow, 1, rows4.length, 6).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 2, rows4.length, 1).setFontWeight('bold');
+    shSum.getRange(curRow, 4, rows4.length, 1).setNumberFormat('#,##0');
+    shSum.getRange(curRow, 6, rows4.length, 1).setNumberFormat('#,##0');
+    shSum.getRange(curRow, 7, rows4.length, 1).setNumberFormat('#,##0.000');
+    shSum.getRange(curRow, 8, rows4.length, 1).setNumberFormat('0.0%');
+    curRow += rows4.length;
+
+    shSum.getRange(curRow, 1, 1, 9).setValues([[
+      '',
+      'TỔNG CỘNG',
+      knownCustomerCount > 0 ? (knownCustomerCount + ' mã khách hàng') : '— (Chưa gán KH)',
+      totalProducts,
+      knownDateLotsCount > 0 ? (knownDateLotsCount + ' lô date') : '—',
+      totalScans,
+      totalKg,
+      totalGrams > 0 ? 1 : 0,
+      ''
+    ]]).setBackground('#E2E8F0').setFontWeight('bold').setVerticalAlignment('middle');
+    shSum.getRange(curRow, 2, 1, 5).setHorizontalAlignment('center');
+    shSum.getRange(curRow, 4, 1, 1).setNumberFormat('#,##0');
+    shSum.getRange(curRow, 6, 1, 1).setNumberFormat('#,##0');
+    shSum.getRange(curRow, 7, 1, 1).setNumberFormat('#,##0.000');
+    shSum.getRange(curRow, 8, 1, 1).setNumberFormat('0.0%');
+  } else {
+    shSum.getRange(curRow, 1, 1, 9).merge().setValue('Chưa có dữ liệu tổng hợp theo Khách hàng.').setHorizontalAlignment('center').setFontColor('#64748B');
+  }
+
+  const sumWidths = [55, 145, 235, 165, 125, 165, 150, 135, 360];
   for (let c = 0; c < sumWidths.length; c++) {
     shSum.setColumnWidth(c + 1, sumWidths[c]);
   }
@@ -1039,6 +1237,7 @@ function rebuildTotalsAndSummaryInternal(ss) {
     totalScans: totalScans,
     totalProducts: totalProducts,
     totalDateLots: knownDateLotsCount,
+    totalCustomers: knownCustomerCount,
     totalKg: totalKg
   };
 }
@@ -1090,4 +1289,4 @@ function jsonResponse(obj) {
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
-/* END_OF_CODE_GS_V10 */
+/* END_OF_CODE_GS_V11 */

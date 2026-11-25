@@ -6,11 +6,11 @@
   <meta name="theme-color" content="#0f2942">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Quét Tồn Kho Tem Mã Vạch — Máy Ảnh Gốc Điện Thoại (Tự Lấy Mã SP • Số Ký • NSX • HSD)</title>
+  <title>Quét Tồn Kho Tem Mã Vạch — Máy Ảnh 1 Chạm (Hỗ Trợ Barcode KH • Mã SP • Số Ký • NSX • HSD)</title>
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=18">
+  <link rel="stylesheet" href="./styles.css?v=19">
 </head>
 <body>
 
@@ -23,6 +23,23 @@
 
     <!-- ==================== DUY NHẤT CHẾ ĐỘ MÁY ẢNH CHỤP 1 CHẠM: BẤM CHỤP -> NỔI HÌNH LÊN LÀ ĐÃ GHI NHẬN (KHÔNG CẦN NÚT OK) ==================== -->
     <div id="scanTopSection">
+
+      <!-- TRƯỜNG QUÉT BARCODE KHÁCH HÀNG TRƯỚC LÚC QUÉT SẢN PHẨM (TÙY CHỌN — CÓ THỂ BỎ QUA KHÔNG BẮT BUỘC) -->
+      <div id="customerScanBar" class="customer-scan-bar">
+        <div class="customer-bar-head">
+          <span class="customer-bar-title">👤 Barcode khách hàng <span class="customer-opt-tag">(Không bắt buộc • Có thể bỏ qua)</span></span>
+          <span id="customerActiveChip" class="customer-active-chip" style="display:none;">Đang gán KH</span>
+        </div>
+        <div class="customer-bar-controls">
+          <input type="text" id="customerBarcodeInput" class="customer-barcode-input" autocomplete="off" placeholder="Bỏ trống nếu bỏ qua, hoặc quét/nhập mã KH...">
+          <button type="button" id="btnScanCustomerBarcode" class="btn customer-scan-btn" title="Quét 1 chạm Barcode khách hàng bằng Máy ảnh trước khi quét sản phẩm">
+            📷 Quét mã KH
+          </button>
+          <button type="button" id="btnClearCustomerBarcode" class="btn customer-skip-btn" style="display:none;" title="Bỏ qua / Xóa mã khách hàng">
+            ✕ Bỏ qua
+          </button>
+        </div>
+      </div>
 
       <div id="cameraBoxCard" class="camera-card">
 
@@ -62,8 +79,8 @@
           <!-- Khung ngắm gọn chuẩn máy ảnh chụp ảnh tĩnh 4:3 -->
           <div class="barcode-aim-overlay">
             <div class="barcode-aim-box photo-clean-frame">
-              <div class="aim-zone-top">📷 MÁY ẢNH 1 CHẠM v18 • CHẠM MÀN HÌNH LẤY NÉT</div>
-              <div class="aim-zone-bottom">Bấm nút tròn Chụp → Nổi hình lên là ĐÃ GHI NHẬN (Không cần bấm OK)</div>
+              <div id="aimZoneTop" class="aim-zone-top">📷 MÁY ẢNH 1 CHẠM v19 • CHẠM MÀN HÌNH LẤY NÉT</div>
+              <div id="aimZoneBottom" class="aim-zone-bottom">Bấm nút tròn Chụp → Nổi hình lên là ĐÃ GHI NHẬN (Không cần bấm OK)</div>
             </div>
           </div>
 
@@ -158,6 +175,11 @@
             <span class="latest-time">🕒 <strong id="latestTime">—</strong></span>
           </div>
 
+          <div class="latest-customer-row">
+            <span>👤 Barcode khách hàng:</span>
+            <strong id="latestCustomer">—</strong>
+          </div>
+
           <div style="font-size:11.5px;font-weight:700;color:#475569;">Tên sản phẩm:</div>
           <div id="latestName" class="latest-product-name">—</div>
 
@@ -217,16 +239,16 @@
             <button type="button" id="btnClearSession" class="btn btn-danger" style="padding:7px 10px;font-size:12.5px;">🧹 Xóa làm phiên mới</button>
           </div>
         </div>
-        <input type="search" id="searchHistoryInput" class="search-input" placeholder="🔍 Tìm theo Mã SP, Tên SP, NSX/HSD (12/11/2026) hoặc Mã vạch...">
+        <input type="search" id="searchHistoryInput" class="search-input" placeholder="🔍 Tìm theo Barcode KH, Mã SP, Tên SP, NSX/HSD (12/11/2026) hoặc Mã vạch...">
         <div id="fullScansList" class="scan-list"></div>
       </section>
     </div>
 
-    <!-- ==================== TAB 3: TỔNG HỢP TỒN ĐA CHIỀU (THEO SKU & THEO DATE) ==================== -->
+    <!-- ==================== TAB 3: TỔNG HỢP TỒN ĐA CHIỀU (SKU • DATE • KHÁCH HÀNG) ==================== -->
     <div id="tabSummary" class="tab-view">
       <section class="section-card">
         <div class="section-header">
-          <h2 class="section-title">📊 Tổng hợp tồn theo SKU &amp; theo Date</h2>
+          <h2 class="section-title">📊 Tổng hợp tồn theo SKU • Date • KH</h2>
           <div style="display:flex;gap:6px;">
             <button type="button" id="btnForceSyncNow" class="btn btn-primary" style="padding:7px 11px;font-size:12.5px;">🔄 Đẩy lên GG Sheet</button>
             <button type="button" id="btnExportExcel2" class="btn btn-success" style="padding:7px 11px;font-size:12.5px;">📥 Xuất Excel</button>
@@ -236,6 +258,7 @@
           <button type="button" class="summary-dim-btn active" data-dim="sku_date">📦 SKU × Date</button>
           <button type="button" class="summary-dim-btn" data-dim="sku">🏷️ Theo SKU</button>
           <button type="button" class="summary-dim-btn" data-dim="date">📅 Theo Date</button>
+          <button type="button" class="summary-dim-btn" data-dim="customer">👤 Theo KH</button>
         </div>
         <div style="overflow-x:auto;">
           <table class="summary-table">
@@ -285,7 +308,7 @@
         <div class="settings-hero-top">
           <div>
             <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-            <div class="brand-sub">Bản v18 Tinh Gọn • Duy nhất Chế độ Máy ảnh gốc Điện thoại • Tồn theo SKU &amp; Date</div>
+            <div class="brand-sub">Bản v19 Tinh Gọn • Hỗ trợ Barcode Khách hàng tùy chọn + Máy ảnh 1 chạm • Tồn theo SKU, Date &amp; KH</div>
           </div>
           <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
             <span id="syncStatusDot" class="sync-dot"></span>
@@ -363,6 +386,11 @@
     <div class="modal-box">
       <h3 id="editModalTitle" class="modal-title">✏️ Chỉnh Sửa Dòng Đã Quét</h3>
       <input type="hidden" id="editRecordId">
+
+      <div class="form-group">
+        <label class="form-label" for="editCustomerInput">Barcode khách hàng (Không bắt buộc — để trống nếu bỏ qua)</label>
+        <input type="text" id="editCustomerInput" class="form-control" placeholder="Để trống (—) hoặc nhập mã khách hàng">
+      </div>
 
       <div class="form-group">
         <label class="form-label" for="editCodeInput">Mã sản phẩm (5 số — ví dụ: 10040)</label>
@@ -448,7 +476,7 @@
           <li>Bấm <strong>Triển khai → Tùy chọn triển khai mới → Ứng dụng web</strong>, mục <em>Ai có quyền truy cập</em> chọn <strong>Bất kỳ ai (Anyone)</strong> → chép link <code>/exec</code> dán vào ô dưới!</li>
         </ol>
         <button type="button" id="btnCopyAppsScript" class="btn btn-navy" style="width:100%;">
-          📋 Sao chép Mã Kết Nối Google Sheet (Có NSX & HSD)
+          📋 Sao chép Mã Kết Nối Google Sheet (Có Barcode KH + NSX &amp; HSD)
         </button>
       </div>
 
@@ -487,10 +515,10 @@
   </div>
 
   <!-- Bộ giải mã mã vạch 1D + Bộ đọc chữ NSX/HSD trên tem nạp cục bộ 100% (chạy mượt cả khi mất mạng) -->
-  <script src="./vendor/zxing_wasm_reader.js?v=18"></script>
-  <script src="./vendor/ocr/tesseract.min.js?v=18"></script>
-  <script src="./catalog.js?v=18"></script>
-  <script src="./apps_script_embed.js?v=18"></script>
-  <script src="./app.js?v=18"></script>
+  <script src="./vendor/zxing_wasm_reader.js?v=19"></script>
+  <script src="./vendor/ocr/tesseract.min.js?v=19"></script>
+  <script src="./catalog.js?v=19"></script>
+  <script src="./apps_script_embed.js?v=19"></script>
+  <script src="./app.js?v=19"></script>
 </body>
 </html>

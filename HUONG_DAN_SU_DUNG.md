@@ -1,6 +1,6 @@
-# 📦 HƯỚNG DẪN SỬ DỤNG APP CHỤP TEM TỒN KHO — BẢN v18 (CHỤP 1 CHẠM • NỔI HÌNH LÊN LÀ ĐÃ GHI NHẬN • BỎ QUA NÚT OK)
+# 📦 HƯỚNG DẪN SỬ DỤNG APP CHỤP TEM TỒN KHO — BẢN v19 (HỖ TRỢ QUÉT BARCODE KHÁCH HÀNG TÙY CHỌN • CHỤP 1 CHẠM BỎ QUA NÚT OK)
 
-Ứng dụng chuyên biệt **1 chế độ duy nhất trên Điện thoại**: dùng **cảm biến chụp ảnh tĩnh 4:3 độ nét gốc** để chụp tem cân hàng, **bấm chụp 1 chạm là nổi hình vừa chụp lên màn hình và TỰ ĐỘNG GHI NHẬN ngay lập tức** (**bỏ qua hoàn toàn màn hình bấm nút `OK / Sử dụng ảnh`**), tự lấy trọn **Mã sản phẩm + Tên hàng + Số ký + NSX + HSD**, **khóa cứng không đọc nhầm ô vuông góc tem**, hoạt động **100% cả khi mất mạng** và **tự động đồng bộ 2 chiều với Google Sheet `SCAN TỒN`**.
+Ứng dụng chuyên biệt trên Điện thoại dùng **cảm biến chụp ảnh tĩnh 4:3 độ nét gốc**, có sẵn **trường quét Barcode khách hàng ngay phía trên trước lúc quét sản phẩm (hoàn toàn tùy chọn — có thể bỏ qua không bắt buộc)**, **bấm chụp 1 chạm là nổi hình vừa chụp lên màn hình và TỰ ĐỘNG GHI NHẬN ngay lập tức** (**bỏ qua hoàn toàn màn hình bấm nút `OK / Sử dụng ảnh`**), tự lấy trọn **Barcode khách hàng (nếu có) + Mã sản phẩm + Tên hàng + Số ký + NSX + HSD**, hoạt động **100% cả khi mất mạng** và **tự động đồng bộ 2 chiều với Google Sheet `SCAN TỒN`**.
 
 ---
 
@@ -14,26 +14,39 @@
 
 ---
 
-## 📸 2. CÁCH CHỤP 1 CHẠM SIÊU TỐC (KHÔNG QUA NÚT OK XÁC NHẬN)
+## 👤 2. TRƯỜNG QUÉT BARCODE KHÁCH HÀNG TRƯỚC LÚC QUÉT SẢN PHẨM (CÓ THỂ BỎ QUA)
 
-Đã **loại bỏ sạch toàn bộ các phương thức thừa** (không còn thanh chọn máy PDA, nhập mã tay hay chế độ quét gây rối). Mở ứng dụng lên là vào thẳng **Máy Ảnh Chụp 1 Chạm `v18`**:
+Ngay đầu màn hình chụp có thanh **`👤 Barcode khách hàng (Không bắt buộc • Có thể bỏ qua)`**:
 
-1. **Đưa mặt tem vào khung ngắm** (mặc định máy tự bật mức **`1.5x Nét`** giúp bạn cầm điện thoại cách tem `20–25 cm` lấy nét cực căng cả khay nhỏ `300g` lẫn bao lớn `8 Kg`; có thể chạm nhẹ ngón tay vào mặt tem trên màn hình để khóa nét hoặc bấm **`🔄 Ống kính`** trên máy nhiều camera).
-2. **Bấm nút tròn `📸 CHỤP` đúng 1 lần duy nhất**:
-   - **Tấm hình vừa chụp lập tức nổi lên góc trên màn hình** kèm tiếng *Bíp* — **ĐÃ TỰ ĐỘNG GHI NHẬN NGAY** (gồm **Ảnh thu nhỏ + Tên hàng + Mã SP + Số ký + NSX + HSD**), **tuyệt đối không bắt bấm nút `OK` hay hộp thoại xác nhận**!
-   - Bạn **đưa thẳng ống kính sang bao hàng kế tiếp bấm `📸 CHỤP` liên hoàn ngay lập tức** mà không cần chờ!
-   - Nếu chẳng may bấm chụp nhầm bao, bấm nút nhỏ **`🗑️ Hủy`** ngay trên tấm hình nổi để xóa tức thì; nếu góc ngày bị khuất bóng, bấm **`📷 Bù ngày`** rồi chụp góc chữ `NSX / HSD`.
-3. **Tải loạt ảnh đã chụp sẵn (nếu có)**:
-   - Nếu bạn đã chụp sẵn một loạt hình trong Thư viện điện thoại, bấm nút **`📚 Tải ảnh có sẵn`** ở góc phải dưới khung chụp để chọn nhiều hình đọc tự động 1 lần.
+- **Trường hợp 1 — Không cần gán khách hàng (Bỏ qua luôn)**:
+  - Bạn **không cần bấm hay nhập gì vào ô này** — cứ để trống và chụp thẳng các tem sản phẩm như bình thường! Hệ thống tự động để dấu **`—`** ở cột `Barcode khách hàng` (không chặn, không hỏi xác nhận).
+- **Trường hợp 2 — Cần quét Barcode khách hàng trước khi quét sản phẩm**:
+  1. Bấm nút **`📷 Quét mã KH`** (khung ngắm chuyển sang viền vàng nhạt) → đưa mã vạch khách hàng trên phiếu/rổ vào khung → bấm nút tròn **`📸 CHỤP`** 1 chạm (hoặc gõ trực tiếp vào ô mã khách hàng).
+  2. Tấm hình nổi lên báo **`✅ ĐÃ GÁN BARCODE KHÁCH HÀNG`** và **tự động chuyển ngay về chế độ chụp sản phẩm** (không cần bấm `OK`).
+  3. Toàn bộ các tem sản phẩm bạn chụp tiếp theo sẽ **tự động gắn kèm mã khách hàng này**.
+  4. Khi chuyển sang khách hàng khác, bấm **`📷 Đổi mã KH`** để quét mã mới; hoặc bấm **`✕ Bỏ qua`** để xóa mã khách hàng về trống (`—`).
 
 ---
 
-## 📊 3. BÁO CÁO TỔNG HỢP TỒN THEO MÃ HÀNG (SKU) & THEO HẠN DÙNG (DATE) TRÊN "SCAN TỒN"
+## 📸 3. CÁCH CHỤP SẢN PHẨM 1 CHẠM SIÊU TỐC (KHÔNG QUA NÚT OK XÁC NHẬN)
+
+1. **Đưa mặt tem vào khung ngắm** (mặc định máy tự bật mức **`1.5x Nét`** giúp cầm điện thoại cách tem `20–25 cm` lấy nét cực căng; có thể chạm nhẹ ngón tay vào mặt tem trên màn hình để khóa nét).
+2. **Bấm nút tròn `📸 CHỤP` đúng 1 lần duy nhất**:
+   - **Tấm hình vừa chụp lập tức nổi lên góc trên màn hình** kèm tiếng *Bíp* — **ĐÃ TỰ ĐỘNG GHI NHẬN NGAY** (gồm **Barcode KH (nếu có) + Ảnh thu nhỏ + Tên hàng + Mã SP + Số ký + NSX + HSD**), **tuyệt đối không bắt bấm nút `OK`**!
+   - Đưa thẳng ống kính sang bao hàng kế tiếp bấm **`📸 CHỤP`** liên hoàn ngay lập tức!
+   - Nếu bấm nhầm bao, bấm **`🗑️ Hủy`** ngay trên tấm hình nổi để xóa tức thì; nếu góc ngày bị khuất bóng, bấm **`📷 Bù ngày`** rồi chụp góc chữ `NSX / HSD`.
+3. **Tải loạt ảnh đã chụp sẵn (nếu có)**:
+   - Bấm **`📚 Tải ảnh có sẵn`** ở góc phải dưới khung chụp để chọn nhiều hình đọc tự động 1 lần.
+
+---
+
+## 📊 4. BÁO CÁO TỔNG HỢP TỒN 4 CHIỀU TRÊN "SCAN TỒN"
 
 - Bảng tính **`SCAN TỒN`** gắn cố định:
   👉 `https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0`
-- Trang **`Tong_Hop_Ton`** trên Google Sheet (và mục **`📊 SKU / Date`** trên điện thoại) tự động tổng hợp tồn kho theo **3 chiều đầy đủ**:
-  1. **Theo Mã SP × Theo Hạn dùng (`NSX / HSD`)**: Chi tiết từng mã hàng ở từng lô ngày kèm cảnh báo hạn dùng.
-  2. **Gộp Theo Mã Sản Phẩm (`SKU`)**: Tổng số tem, tổng số ký, bình quân Kg/tem của từng mặt hàng.
-  3. **Gộp Theo Hạn Dùng (`Date`)**: Sắp xếp lô hạn dùng sớm lên đầu để ưu tiên xuất trước.
-- Khi bạn xóa hoặc sửa dòng trực tiếp trên trang **`Chi_Tiet_Scan`** của Google Sheet, màn hình điện thoại đang mở sẽ **tự động cập nhật khớp theo dữ liệu thực** trong vài giây mà không cần bấm nút làm mới.
+- Trang **`Chi_Tiet_Scan`** ghi chi tiết 12 cột (có cột **`Barcode khách hàng`** ngay cột thứ 2; dòng bỏ qua hiển thị **`—`**).
+- Trang **`Tong_Hop_Ton`** (và mục **`📊 SKU / Date`** trên điện thoại) tự động tổng hợp tồn kho theo **4 chiều đối soát khớp 100%**:
+  1. **Theo Mã SP × Theo Hạn dùng (`SKU × Date`)**
+  2. **Gộp Theo Mã Sản Phẩm (`Theo SKU`)**
+  3. **Gộp Theo Hạn Dùng (`Theo Date`)**
+  4. **Gộp Theo Barcode Khách Hàng (`Theo KH`)**

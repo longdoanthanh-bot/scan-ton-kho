@@ -5,6 +5,7 @@
   const STORAGE_CUSTOM_CATALOG = 'scan_ton_custom_catalog_v1';
   const STORAGE_PENDING_OPS = 'scan_ton_pending_ops_v1';
   const STORAGE_SETTINGS = 'scan_ton_settings_v1';
+  const STORAGE_ACTIVE_CUSTOMER = 'scan_ton_active_customer_v1';
 
   const VALID_SCALE_PREFIXES = ['10', '11', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29'];
 
@@ -21,6 +22,17 @@
 
   const WASM_1D_LOCAL_OPTIONS = {
     formats: ['EAN-13', 'Code128', 'EAN-8', 'ITF', 'UPC-A'],
+    tryHarder: true,
+    tryRotate: true,
+    tryInvert: true,
+    tryDownscale: false,
+    binarizer: 'LocalAverage',
+    maxNumberOfSymbols: 2
+  };
+
+  // Tùy chọn giải mã mọi loại Barcode 1D cho trường Barcode khách hàng (Code128, Code39, Code93, Codabar, EAN-13, EAN-8, ITF, UPC-A — tuyệt đối khóa cứng mã vuông 2D)
+  const WASM_CUSTOMER_1D_OPTIONS = {
+    formats: ['Code128', 'Code39', 'Code93', 'Codabar', 'EAN-13', 'EAN-8', 'ITF', 'UPC-A'],
     tryHarder: true,
     tryRotate: true,
     tryInvert: true,
@@ -57,8 +69,10 @@
   let dateOnlyTargetRecordId = null;
   let rescueTargetRecordId = null;
   let currentSummaryDim = 'sku_date';
+  let activeCustomerBarcode = '';
+  let customerScanArmed = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v18';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v19';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -163,7 +177,7 @@
     }
     if (nativeDetectorInitPromise) return nativeDetectorInitPromise;
     nativeDetectorInitPromise = Ctor.getSupportedFormats().then(function (supported) {
-      const formats1D = ['ean_13', 'code_128', 'ean_8', 'itf', 'upc_a'].filter(function (f) {
+      const formats1D = ['ean_13', 'code_128', 'code_39', 'code_93', 'codabar', 'ean_8', 'itf', 'upc_a', 'upc_e'].filter(function (f) {
         return supported.indexOf(f) !== -1;
       });
       if (formats1D.length > 0) {
@@ -283,8 +297,8 @@
     if (singleScanActive || pendingSnapJobsCount > 0 || batchProcessingActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) return;
     pendingSwReload = false;
     try {
-      if (sessionStorage.getItem('sw_reloaded_v18') === '1') return;
-      sessionStorage.setItem('sw_reloaded_v18', '1');
+      if (sessionStorage.getItem('sw_reloaded_v19') === '1') return;
+      sessionStorage.setItem('sw_reloaded_v19', '1');
     } catch (e) {}
     window.location.reload();
   }
@@ -295,7 +309,7 @@
       return;
     }
     const hadPreviousController = Boolean(navigator.serviceWorker.controller);
-    navigator.serviceWorker.register('./sw.js?v=18', { updateViaCache: 'none' }).then(function (reg) {
+    navigator.serviceWorker.register('./sw.js?v=19', { updateViaCache: 'none' }).then(function (reg) {
       if (reg.waiting) {
         reg.waiting.postMessage('SKIP_WAITING');
       }
@@ -321,8 +335,8 @@
         return;
       }
       try {
-        if (sessionStorage.getItem('sw_reloaded_v18') === '1') return;
-        sessionStorage.setItem('sw_reloaded_v18', '1');
+        if (sessionStorage.getItem('sw_reloaded_v19') === '1') return;
+        sessionStorage.setItem('sw_reloaded_v19', '1');
       } catch (e) {}
       window.location.reload();
     });
@@ -338,11 +352,13 @@
     }
 
     loadSettings();
+    loadActiveCustomerState();
     checkUrlParamsForSheet();
     loadCatalog();
     await loadRecordsAndOpsWithVaultRecovery();
 
     bindEvents();
+    syncCustomerScanBarUI();
     updateOfflineBannerUI();
     refreshSettingsSheetLinkUI();
 
@@ -672,6 +688,119 @@
   function formatLotDateDisplay(val) {
     const clean = normalizeDateVN(val);
     return clean || '—';
+  }
+
+  function cleanCustomerBarcode(raw) {
+    const s = String(raw || '').replace(/[\u0000-\u001F\u007F]+/g, ' ').trim();
+    if (!s || s === '—' || s === '-' || s === 'null' || s === 'undefined') return '';
+    return s.slice(0, 64);
+  }
+
+  function formatCustomerDisplay(val) {
+    const clean = cleanCustomerBarcode(val);
+    return clean || '—';
+  }
+
+  function loadActiveCustomerState() {
+    try {
+      const saved = localStorage.getItem(STORAGE_ACTIVE_CUSTOMER);
+      activeCustomerBarcode = cleanCustomerBarcode(saved);
+    } catch (e) {
+      activeCustomerBarcode = '';
+    }
+  }
+
+  function setActiveCustomerBarcode(rawVal, disarmAfterSet) {
+    activeCustomerBarcode = cleanCustomerBarcode(rawVal);
+    if (disarmAfterSet) {
+      customerScanArmed = false;
+    }
+    try {
+      if (activeCustomerBarcode) {
+        localStorage.setItem(STORAGE_ACTIVE_CUSTOMER, activeCustomerBarcode);
+      } else {
+        localStorage.removeItem(STORAGE_ACTIVE_CUSTOMER);
+      }
+    } catch (e) {}
+    syncCustomerScanBarUI();
+  }
+
+  function toggleCustomerScanMode(forceState) {
+    customerScanArmed = (typeof forceState === 'boolean') ? forceState : !customerScanArmed;
+    if (customerScanArmed) {
+      rescueTargetRecordId = null;
+    }
+    syncCustomerScanBarUI();
+  }
+
+  function syncCustomerScanBarUI() {
+    const bar = document.getElementById('customerScanBar');
+    const inp = document.getElementById('customerBarcodeInput');
+    const chip = document.getElementById('customerActiveChip');
+    const btnScan = document.getElementById('btnScanCustomerBarcode');
+    const btnSkip = document.getElementById('btnClearCustomerBarcode');
+    const viewportBox = document.getElementById('cameraViewportBox');
+    const aimTop = document.getElementById('aimZoneTop');
+    const aimBottom = document.getElementById('aimZoneBottom');
+
+    if (inp && document.activeElement !== inp && inp.value !== activeCustomerBarcode) {
+      inp.value = activeCustomerBarcode;
+    }
+    if (bar) {
+      bar.classList.toggle('is-armed', Boolean(customerScanArmed));
+      bar.classList.toggle('has-value', Boolean(!customerScanArmed && activeCustomerBarcode));
+    }
+    if (chip) {
+      if (customerScanArmed) {
+        chip.style.display = 'inline-block';
+        chip.textContent = '🎯 Chờ chụp mã KH';
+      } else if (activeCustomerBarcode) {
+        chip.style.display = 'inline-block';
+        chip.textContent = '✅ KH: ' + activeCustomerBarcode;
+      } else {
+        chip.style.display = 'none';
+      }
+    }
+    if (btnScan) {
+      if (customerScanArmed) {
+        btnScan.textContent = '🎯 Đang quét KH';
+      } else if (activeCustomerBarcode) {
+        btnScan.textContent = '📷 Đổi mã KH';
+      } else {
+        btnScan.textContent = '📷 Quét mã KH';
+      }
+    }
+    if (btnSkip) {
+      if (customerScanArmed) {
+        btnSkip.style.display = 'inline-flex';
+        btnSkip.textContent = '⏭️ Bỏ qua';
+      } else if (activeCustomerBarcode) {
+        btnSkip.style.display = 'inline-flex';
+        btnSkip.textContent = '✕ Bỏ qua';
+      } else {
+        btnSkip.style.display = 'none';
+      }
+    }
+    if (viewportBox) {
+      viewportBox.classList.toggle('is-customer-mode', Boolean(customerScanArmed));
+    }
+    if (aimTop) {
+      if (customerScanArmed) {
+        aimTop.textContent = '👤 ĐANG QUÉT BARCODE KHÁCH HÀNG (CÓ THỂ BẤM BỎ QUA)';
+      } else if (activeCustomerBarcode) {
+        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v19 • ĐANG GÁN KH: ' + activeCustomerBarcode;
+      } else {
+        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v19 • CHẠM MÀN HÌNH LẤY NÉT';
+      }
+    }
+    if (aimBottom) {
+      if (customerScanArmed) {
+        aimBottom.textContent = 'Đưa mã vạch Khách hàng vào khung → Bấm nút tròn CHỤP (Nổi hình = Đã gán!)';
+      } else {
+        aimBottom.textContent = 'Bấm nút tròn Chụp → Nổi hình lên là ĐÃ GHI NHẬN (Không cần bấm OK)';
+      }
+    }
+    setShutterUIState('ready');
   }
 
   function getActivePdaLotDates() {
@@ -2548,6 +2677,7 @@
     const record = {
       id: 'scan_' + now.getTime() + '_' + Math.random().toString(36).slice(2, 7),
       scannedAt: formatDateTimeVN(now),
+      customerBarcode: cleanCustomerBarcode(activeCustomerBarcode),
       productCode: parsed.productCode,
       productName: parsed.productName,
       grams: parsed.grams,
@@ -2610,6 +2740,7 @@
     return {
       id: r.id,
       scannedAt: r.scannedAt,
+      customerBarcode: cleanCustomerBarcode(r.customerBarcode),
       productCode: r.productCode,
       productName: r.productName ? r.productName : '—',
       grams: r.grams,
@@ -2622,7 +2753,7 @@
   }
 
   // =========================================================================
-  // CẦU DAO TỰ NGẮT KCS & TỔNG HỢP 3 CHIỀU (THEO SKU × DATE | THEO SKU | THEO DATE)
+  // CẦU DAO TỰ NGẮT KCS & TỔNG HỢP 4 CHIỀU (SKU × DATE | THEO SKU | THEO DATE | THEO KHÁCH HÀNG)
   // =========================================================================
   function parseDateVNForSort(rawStr) {
     const clean = normalizeDateVN(rawStr);
@@ -2662,12 +2793,19 @@
     const byCode = {};
     const bySkuDate = {};
     const byDate = {};
+    const byCustomer = {};
     const knownDateKeys = {};
+    const knownCustomerKeys = {};
 
     for (let i = 0; i < records.length; i++) {
       const r = records[i];
       const g = Math.round(Number(r.grams));
       totalGrams += g;
+
+      const custClean = cleanCustomerBarcode(r.customerBarcode);
+      const hasCustomer = Boolean(custClean !== '');
+      const custKey = hasCustomer ? ('KH_' + custClean) : '__SKIPPED__';
+      if (hasCustomer) knownCustomerKeys[custClean] = true;
 
       const code = String(r.productCode || '').trim() || 'CHUA_RO';
       const pNsx = parseDateVNForSort(r.nsx);
@@ -2761,6 +2899,32 @@
       }
       byDate[datePairKey].skuMap[code].count += 1;
       byDate[datePairKey].skuMap[code].grams += g;
+
+      // 4. Theo Barcode Khách hàng (Tùy chọn — bỏ qua thì gom về '—')
+      if (!byCustomer[custKey]) {
+        byCustomer[custKey] = {
+          customer: hasCustomer ? custClean : '—',
+          hasCustomer: hasCustomer,
+          count: 0,
+          grams: 0,
+          skuMap: {}
+        };
+      }
+      byCustomer[custKey].count += 1;
+      byCustomer[custKey].grams += g;
+      if (!byCustomer[custKey].skuMap[code]) {
+        byCustomer[custKey].skuMap[code] = {
+          code: code,
+          name: r.productName ? r.productName : null,
+          count: 0,
+          grams: 0
+        };
+      }
+      if (!byCustomer[custKey].skuMap[code].name && r.productName) {
+        byCustomer[custKey].skuMap[code].name = r.productName;
+      }
+      byCustomer[custKey].skuMap[code].count += 1;
+      byCustomer[custKey].skuMap[code].grams += g;
     }
 
     const productGroups = Object.keys(byCode).map(function (k) { return byCode[k]; });
@@ -2781,14 +2945,23 @@
       return b.grams - a.grams;
     });
 
+    const customerGroups = Object.keys(byCustomer).map(function (k) { return byCustomer[k]; });
+    customerGroups.sort(function (a, b) {
+      if (a.hasCustomer !== b.hasCustomer) return a.hasCustomer ? -1 : 1;
+      if (b.grams !== a.grams) return b.grams - a.grams;
+      return String(a.customer).localeCompare(String(b.customer));
+    });
+
     return {
       totalScans: records.length,
       totalProducts: productGroups.length,
       totalDateLots: Object.keys(knownDateKeys).length,
+      totalCustomers: Object.keys(knownCustomerKeys).length,
       totalGrams: totalGrams,
       productGroups: productGroups,
       skuDateGroups: skuDateGroups,
-      dateGroups: dateGroups
+      dateGroups: dateGroups,
+      customerGroups: customerGroups
     };
   }
 
@@ -2813,11 +2986,16 @@
       sumDtCount += m.dateGroups[i].count;
       sumDtGrams += m.dateGroups[i].grams;
     }
-    if (sumGroupCount !== m.totalScans || sumSdCount !== m.totalScans || sumDtCount !== m.totalScans) {
-      return { ok: false, error: 'Lệch tổng số tem đối chiếu 3 chiều (' + sumGroupCount + '/' + sumSdCount + '/' + sumDtCount + ' != ' + m.totalScans + ')' };
+    let sumCustCount = 0, sumCustGrams = 0;
+    for (let i = 0; i < m.customerGroups.length; i++) {
+      sumCustCount += m.customerGroups[i].count;
+      sumCustGrams += m.customerGroups[i].grams;
     }
-    if (sumGroupGrams !== m.totalGrams || sumSdGrams !== m.totalGrams || sumDtGrams !== m.totalGrams) {
-      return { ok: false, error: 'Lệch tổng số ký đối chiếu 3 chiều (' + sumGroupGrams + '/' + sumSdGrams + '/' + sumDtGrams + ' != ' + m.totalGrams + ')' };
+    if (sumGroupCount !== m.totalScans || sumSdCount !== m.totalScans || sumDtCount !== m.totalScans || sumCustCount !== m.totalScans) {
+      return { ok: false, error: 'Lệch tổng số tem đối chiếu 4 chiều (' + sumGroupCount + '/' + sumSdCount + '/' + sumDtCount + '/' + sumCustCount + ' != ' + m.totalScans + ')' };
+    }
+    if (sumGroupGrams !== m.totalGrams || sumSdGrams !== m.totalGrams || sumDtGrams !== m.totalGrams || sumCustGrams !== m.totalGrams) {
+      return { ok: false, error: 'Lệch tổng số ký đối chiếu 4 chiều (' + sumGroupGrams + '/' + sumSdGrams + '/' + sumDtGrams + '/' + sumCustGrams + ' != ' + m.totalGrams + ')' };
     }
     return { ok: true, metrics: m };
   }
@@ -2858,6 +3036,15 @@
 
     const latest = records[records.length - 1];
     document.getElementById('latestTime').textContent = latest.scannedAt;
+
+    const latestCustEl = document.getElementById('latestCustomer');
+    if (latestCustEl) {
+      const custVal = cleanCustomerBarcode(latest.customerBarcode);
+      latestCustEl.textContent = custVal || '—';
+      if (latestCustEl.parentElement) {
+        latestCustEl.parentElement.classList.toggle('has-cust', Boolean(custVal));
+      }
+    }
 
     const nameEl = document.getElementById('latestName');
     if (latest.productName) {
@@ -2921,6 +3108,7 @@
       if (!query) return true;
       const r = item.rec;
       return (
+        String(r.customerBarcode || '').toLowerCase().indexOf(query) !== -1 ||
         String(r.productCode || '').toLowerCase().indexOf(query) !== -1 ||
         String(r.productName || '').toLowerCase().indexOf(query) !== -1 ||
         String(r.nsx || '').toLowerCase().indexOf(query) !== -1 ||
@@ -2945,8 +3133,12 @@
     const readingRowNow = Boolean(readingDateRecordIds[r.id]);
     const nsxDisp = r.nsx ? formatLotDateDisplay(r.nsx) : (readingRowNow ? '⏳ Đang đọc...' : '—');
     const hsdDisp = r.hsd ? formatLotDateDisplay(r.hsd) : (readingRowNow ? '⏳ Đang đọc...' : '—');
+    const custVal = cleanCustomerBarcode(r.customerBarcode);
+    const custBadge = custVal
+      ? ('<span class="scan-cust-badge">👤 KH: ' + escapeHtml(custVal) + '</span>')
+      : ('<span class="scan-cust-badge is-empty">👤 KH: —</span>');
     const lotLine = (
-      '<div class="scan-lot-badge">📅 NSX: ' + escapeHtml(nsxDisp) + ' • HSD: ' + escapeHtml(hsdDisp) + '</div>'
+      '<div>' + custBadge + '<span class="scan-lot-badge">📅 NSX: ' + escapeHtml(nsxDisp) + ' • HSD: ' + escapeHtml(hsdDisp) + '</span></div>'
     );
     return (
       '<div class="scan-row-card' + (r.edited ? ' edited' : '') + '">' +
@@ -3078,6 +3270,52 @@
       return;
     }
 
+    if (currentSummaryDim === 'customer') {
+      if (thead) {
+        thead.innerHTML = (
+          '<tr>' +
+            '<th>Barcode khách hàng</th>' +
+            '<th>Các SKU thuộc Khách hàng</th>' +
+            '<th class="num">Số tem</th>' +
+            '<th class="num">Số ký (Kg)</th>' +
+          '</tr>'
+        );
+      }
+      if (!m.customerGroups || m.customerGroups.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#64748b;padding:18px;">Chưa có dữ liệu tổng hợp theo Khách hàng.</td></tr>';
+        return;
+      }
+      let html = '';
+      for (let i = 0; i < m.customerGroups.length; i++) {
+        const cg = m.customerGroups[i];
+        const sList = Object.keys(cg.skuMap).map(function (k) { return cg.skuMap[k]; });
+        sList.sort(function (a, b) { return b.grams - a.grams; });
+        const skuLines = sList.map(function (s) {
+          return escapeHtml(s.code + ' - ' + (s.name || '—') + ' (' + s.count + ' tem • ' + formatKg(s.grams) + ' Kg)');
+        }).join('<br>');
+        const custCell = cg.hasCustomer
+          ? ('<span class="scan-cust-badge">👤 ' + escapeHtml(cg.customer) + '</span>')
+          : '<span style="font-weight:800;color:#64748b;">— (Không gán KH)</span>';
+        html += (
+          '<tr>' +
+            '<td>' + custCell + '</td>' +
+            '<td><div style="font-size:11.5px;color:#334155;font-weight:600;line-height:1.45;">' + skuLines + '</div></td>' +
+            '<td class="num">' + formatInt(cg.count) + '</td>' +
+            '<td class="num" style="color:#15803d;">' + formatKg(cg.grams) + '</td>' +
+          '</tr>'
+        );
+      }
+      html += (
+        '<tr style="background:#f0fdf4;font-weight:900;">' +
+          '<td colspan="2">TỔNG CỘNG (' + formatInt(m.customerGroups.length) + ' nhóm KH)</td>' +
+          '<td class="num">' + formatInt(m.totalScans) + '</td>' +
+          '<td class="num" style="color:#15803d;">' + formatKg(m.totalGrams) + '</td>' +
+        '</tr>'
+      );
+      tbody.innerHTML = html;
+      return;
+    }
+
     // Chế độ gộp theo SKU ('sku')
     if (thead) {
       thead.innerHTML = (
@@ -3171,6 +3409,8 @@
 
     if (isNew) {
       const pdaLot = getActivePdaLotDates();
+      const custInp = document.getElementById('editCustomerInput');
+      if (custInp) custInp.value = activeCustomerBarcode || '';
       document.getElementById('editCodeInput').value = '';
       document.getElementById('editNameInput').value = '';
       document.getElementById('editWeightInput').value = '';
@@ -3181,6 +3421,8 @@
     } else {
       const rec = records.find(function (r) { return r.id === recordId; });
       if (!rec) return;
+      const custInp = document.getElementById('editCustomerInput');
+      if (custInp) custInp.value = cleanCustomerBarcode(rec.customerBarcode);
       document.getElementById('editCodeInput').value = rec.productCode || '';
       document.getElementById('editNameInput').value = rec.productName || '';
       document.getElementById('editWeightInput').value = (rec.grams / 1000).toFixed(3);
@@ -3199,6 +3441,8 @@
 
   function saveEditedRecord() {
     const id = document.getElementById('editRecordId').value;
+    const custInp = document.getElementById('editCustomerInput');
+    const cleanCust = custInp ? cleanCustomerBarcode(custInp.value) : '';
     const code = String(document.getElementById('editCodeInput').value || '').trim();
     const rawName = String(document.getElementById('editNameInput').value || '').trim();
     const weightStr = String(document.getElementById('editWeightInput').value || '').replace(',', '.').trim();
@@ -3241,6 +3485,7 @@
       const newRec = {
         id: 'scan_' + now.getTime() + '_' + Math.random().toString(36).slice(2, 7),
         scannedAt: formatDateTimeVN(now),
+        customerBarcode: cleanCust,
         productCode: code,
         productName: finalName,
         grams: grams,
@@ -3256,6 +3501,7 @@
       const idx = records.findIndex(function (r) { return r.id === id; });
       if (idx === -1) return;
       delete readingDateRecordIds[id];
+      records[idx].customerBarcode = cleanCust;
       records[idx].productCode = code;
       records[idx].productName = finalName;
       records[idx].grams = grams;
@@ -3569,12 +3815,16 @@
       textEl.textContent = 'CHỤP';
       statusEl.textContent = customText || '✅ Đã nổi hình & tự động ghi nhận! Chụp tiếp tem sau được ngay';
     } else {
-      iconEl.textContent = '📸';
-      textEl.textContent = 'CHỤP';
+      iconEl.textContent = customerScanArmed ? '👤' : '📸';
+      textEl.textContent = customerScanArmed ? 'MÃ KH' : 'CHỤP';
       statusEl.textContent = customText || (
-        rescueTargetRecordId
-          ? '🎯 Đưa rõ góc chữ NSX / HSD vào khung → Bấm nút tròn CHỤP để bù ngày ngay!'
-          : '👆 Chạm vào tem để lấy nét → Bấm nút tròn là nổi hình & ghi nhận ngay (Bỏ qua nút OK)!'
+        customerScanArmed
+          ? '🎯 Đưa Barcode khách hàng vào khung → Bấm nút tròn (Hoặc bấm "⏭️ Bỏ qua" nếu không cần)!'
+          : (rescueTargetRecordId
+              ? '🎯 Đưa rõ góc chữ NSX / HSD vào khung → Bấm nút tròn CHỤP để bù ngày ngay!'
+              : (activeCustomerBarcode
+                  ? ('👤 Đang gán KH: ' + activeCustomerBarcode + ' → Bấm nút tròn CHỤP tem sản phẩm ngay!')
+                  : '👆 Chạm vào tem để lấy nét → Bấm nút tròn là nổi hình & ghi nhận ngay (Bỏ qua nút OK)!'))
       );
     }
   }
@@ -3753,15 +4003,22 @@
     const instantThumb = createThumbnailDataUrl(instantStillCanvas, 200);
     const shotRescueRecId = rescueTargetRecordId;
     rescueTargetRecordId = null;
+    const shotIsCustomerMode = Boolean(customerScanArmed && !shotRescueRecId);
 
     pendingSnapJobsCount += 1;
     const queueNote = pendingSnapJobsCount > 1 ? (' (Hàng chờ: ' + pendingSnapJobsCount + ' tấm)') : '';
     updateSnapPopCardUI({
       stateClass: '',
       thumbSrc: instantThumb,
-      badge: '⚡ ĐÃ CHỤP • ĐANG TỰ ĐỘNG GHI NHẬN' + queueNote,
-      title: shotRescueRecId ? 'Đang đọc bù NSX / HSD từ ảnh vừa chụp...' : 'Đang lấy Mã SP • Số ký • NSX • HSD...',
-      dates: 'Không cần bấm OK — có thể hướng sang tem kế tiếp ngay!',
+      badge: shotIsCustomerMode
+        ? ('👤 ĐÃ CHỤP • ĐANG ĐỌC BARCODE KHÁCH HÀNG' + queueNote)
+        : ('⚡ ĐÃ CHỤP • ĐANG TỰ ĐỘNG GHI NHẬN' + queueNote),
+      title: shotIsCustomerMode
+        ? 'Đang nhận diện mã vạch sọc khách hàng...'
+        : (shotRescueRecId ? 'Đang đọc bù NSX / HSD từ ảnh vừa chụp...' : 'Đang lấy Mã SP • Số ký • NSX • HSD...'),
+      dates: shotIsCustomerMode
+        ? 'Quét xong sẽ tự chuyển ngay sang chế độ chụp sản phẩm!'
+        : 'Không cần bấm OK — có thể hướng sang tem kế tiếp ngay!',
       recordId: null
     });
     setShutterUIState('captured');
@@ -3776,7 +4033,9 @@
       try {
         await warmUpWasmEngine();
         await ensureNativeBarcodeDetector();
-        await warmUpOcrWorker();
+        if (!shotIsCustomerMode) {
+          await warmUpOcrWorker();
+        }
 
         const hwBlob = await hwBlobPromise;
         if (hwBlob) {
@@ -3791,6 +4050,38 @@
               finalThumb = createThumbnailDataUrl(workCanvas, 200) || instantThumb;
             }
           } catch (e) {}
+        }
+
+        // Trường hợp 0: Đang ở chế độ quét Barcode khách hàng trước khi quét sản phẩm (có thể bấm Bỏ qua bất cứ lúc nào)
+        if (shotIsCustomerMode) {
+          const custHit = await decodeCustomer1DBarcode(hwBlob, workCanvas);
+          const cleanCust = custHit ? cleanCustomerBarcode(custHit.code) : '';
+          if (cleanCust) {
+            setActiveCustomerBarcode(cleanCust, true);
+            playBeep('ok');
+            vibrateDevice([35]);
+            updateSnapPopCardUI({
+              stateClass: 'state-ok',
+              thumbSrc: finalThumb,
+              badge: '✅ ĐÃ GÁN BARCODE KHÁCH HÀNG — CHỤP SP NGAY!',
+              title: '👤 Khách hàng: ' + cleanCust,
+              dates: 'Các tem sản phẩm chụp tiếp theo sẽ tự gắn mã KH này (Bấm "✕ Bỏ qua" nếu muốn xóa)',
+              recordId: null
+            });
+            showBanner('ok', '✅ Đã gán Barcode khách hàng: "' + cleanCust + '" — Giờ hãy chụp các tem sản phẩm!');
+          } else {
+            playBeep('error');
+            updateSnapPopCardUI({
+              stateClass: 'state-err',
+              thumbSrc: finalThumb,
+              badge: '❌ CHƯA RÕ BARCODE KHÁCH HÀNG — CHỤP LẠI HOẶC BỎ QUA',
+              title: 'Chưa thấy rõ dải mã vạch sọc khách hàng',
+              dates: 'Đưa rõ mã vạch KH vào khung chụp lại, hoặc bấm "⏭️ Bỏ qua" ở thanh trên để quét SP luôn!',
+              recordId: null
+            });
+            showBanner('warn', '⚠️ Chưa đọc rõ Barcode khách hàng — Chụp lại hoặc bấm "⏭️ Bỏ qua" nếu không cần!');
+          }
+          return;
         }
 
         // Trường hợp A: Chụp bù ngày NSX/HSD cho dòng cụ thể
@@ -3895,18 +4186,20 @@
             if (pendingSnapJobsCount <= 1) {
               vibrateDevice([35]);
             }
+            const custPrefix = r.customerBarcode ? ('👤 KH: ' + r.customerBarcode + ' • ') : '';
             updateSnapPopCardUI({
               stateClass: hasBoth ? 'state-ok' : 'state-warn',
               thumbSrc: finalThumb,
               badge: hasBoth ? '✅ ĐÃ GHI NHẬN TỰ ĐỘNG!' : '⚠️ ĐÃ GHI NHẬN MÃ & KÝ (BẤM BÙ NGÀY NẾU CẦN)',
               title: (r.productName || ('Mã ' + r.productCode)) + ' (' + r.productCode + ') — ' + formatKg(r.grams) + ' Kg',
-              dates: 'NSX: ' + formatLotDateDisplay(r.nsx) + ' • HSD: ' + formatLotDateDisplay(r.hsd),
+              dates: custPrefix + 'NSX: ' + formatLotDateDisplay(r.nsx) + ' • HSD: ' + formatLotDateDisplay(r.hsd),
               recordId: r.id,
               showRescue: !hasBoth
             });
             showBanner(
               hasBoth ? 'ok' : 'warn',
-              '✅ Đã ghi nhận: ' + (r.productName || ('Mã ' + r.productCode)) + ' (' + r.productCode + ') — ' +
+              '✅ Đã ghi nhận: ' + (r.customerBarcode ? ('[KH: ' + r.customerBarcode + '] ') : '') +
+              (r.productName || ('Mã ' + r.productCode)) + ' (' + r.productCode + ') — ' +
               formatKg(r.grams) + ' Kg | NSX: ' + formatLotDateDisplay(r.nsx) + ' • HSD: ' + formatLotDateDisplay(r.hsd)
             );
           } else {
@@ -4556,6 +4849,7 @@
     const record = {
       id: 'scan_' + now.getTime() + '_' + Math.random().toString(36).slice(2, 7),
       scannedAt: formatDateTimeVN(now),
+      customerBarcode: cleanCustomerBarcode(activeCustomerBarcode),
       productCode: parsed.productCode,
       productName: parsed.productName,
       grams: parsed.grams,
@@ -4622,6 +4916,7 @@
     let fullOkCount = 0;
     let codeOnlyCount = 0;
     let failCount = 0;
+    let customerAssignedCount = 0;
 
     const updateScoreboard = function (doneCount, statusLine) {
       if (elTotal) elTotal.textContent = String(total);
@@ -4667,6 +4962,43 @@
         try {
           const cleanPack = await loadCleanCanvasFromFile(file, 2400);
           cleanCanvas = cleanPack.canvas;
+
+          if (customerScanArmed && i === 0) {
+            let custHit = await decodeCustomer1DBarcode(file, cleanCanvas);
+            if (!custHit && navigator.onLine && location.protocol.startsWith('http') && (location.port === '8088' || location.port === '8443')) {
+              const srvCust = await decodePhotoViaLocalCppServer(file);
+              if (srvCust) custHit = { code: srvCust };
+            }
+            const cleanCust = custHit ? cleanCustomerBarcode(custHit.code) : '';
+            if (cleanCust) {
+              setActiveCustomerBarcode(cleanCust, true);
+              customerAssignedCount += 1;
+              appendRowReport(
+                'ok',
+                '✅ Đã gán Barcode khách hàng: ' + escapeHtml(cleanCust),
+                'Tất cả tem sản phẩm tiếp theo sẽ tự động gắn mã KH "' + escapeHtml(cleanCust) + '"',
+                null
+              );
+              updateSnapPopCardUI({
+                stateClass: 'state-ok',
+                thumbSrc: createThumbnailDataUrl(cleanCanvas, 200),
+                badge: '✅ ĐÃ GÁN BARCODE KHÁCH HÀNG — CHỤP SP NGAY!',
+                title: '👤 Khách hàng: ' + cleanCust,
+                dates: 'Các tem sản phẩm chụp tiếp theo sẽ tự gắn mã KH này',
+                recordId: null
+              });
+              continue;
+            } else {
+              failCount += 1;
+              appendRowReport(
+                'err',
+                '❌ #' + (i + 1) + ' (' + escapeHtml(shortName) + ') — Chưa đọc rõ Barcode khách hàng',
+                'Hãy chụp rõ mã vạch khách hàng hoặc bấm "⏭️ Bỏ qua" để quét sản phẩm luôn!',
+                null
+              );
+              continue;
+            }
+          }
 
           let hit = await decodePhotoInBrowserWasm(file, cleanCanvas);
           if (!hit && navigator.onLine && location.protocol.startsWith('http') && (location.port === '8088' || location.port === '8443')) {
@@ -4788,18 +5120,21 @@
     } finally {
       batchProcessingActive = false;
       if (btnCancel) btnCancel.style.display = 'none';
-      const doneTotal = fullOkCount + codeOnlyCount + failCount;
+      const doneTotal = fullOkCount + codeOnlyCount + failCount + customerAssignedCount;
       const summaryLine = (batchCancelRequested ? '⏹️ Đã dừng theo yêu cầu: ' : '✅ Đã xử lý xong ' + doneTotal + '/' + total + ' ảnh: ') +
-        'Ghi nhận ' + (fullOkCount + codeOnlyCount) + ' tem (' + fullOkCount + ' đủ Mã+Ngày' +
-        (codeOnlyCount > 0 ? ', ' + codeOnlyCount + ' thiếu Ngày' : '') +
-        (failCount > 0 ? ', ' + failCount + ' ảnh chưa rõ mã' : '') + ')!';
+        (customerAssignedCount > 0 && (fullOkCount + codeOnlyCount) === 0
+          ? ('Đã gán Barcode khách hàng "' + activeCustomerBarcode + '" — Giờ hãy chụp các tem sản phẩm!')
+          : ('Ghi nhận ' + (fullOkCount + codeOnlyCount) + ' tem (' + fullOkCount + ' đủ Mã+Ngày' +
+             (codeOnlyCount > 0 ? ', ' + codeOnlyCount + ' thiếu Ngày' : '') +
+             (customerAssignedCount > 0 ? ', 1 ảnh mã KH' : '') +
+             (failCount > 0 ? ', ' + failCount + ' ảnh chưa rõ mã' : '') + ')!'));
       updateScoreboard(total, summaryLine);
 
       renderAll(true);
       flushSyncQueue(false);
       setTimeout(checkPendingSwReload, 200);
 
-      if ((fullOkCount + codeOnlyCount) > 0) {
+      if ((fullOkCount + codeOnlyCount + customerAssignedCount) > 0) {
         playBeep('ok');
         vibrateDevice([45, 35, 65]);
         showBanner('ok', summaryLine);
@@ -5281,6 +5616,116 @@
     return null;
   }
 
+  // Giải mã mọi chuẩn mã vạch sọc 1D cho trường tùy chọn Barcode khách hàng (Code128, Code39, Code93, Codabar, EAN-13, EAN-8, ITF, UPC-A — khóa cứng 100% mã vuông 2D)
+  async function decodeCustomer1DBarcode(file, preloadedCleanCanvas) {
+    try {
+      const bmp = file ? await loadImageSourceForCanvas(file) : preloadedCleanCanvas;
+      if (!bmp) return null;
+      const drawSource = bmp._el || bmp;
+      const bw = bmp.width;
+      const bh = bmp.height;
+
+      const workCanvas = document.createElement('canvas');
+      const workCtx = workCanvas.getContext('2d', { willReadFrequently: true });
+      const custPasses = [
+        { cw: 1.0, ch: 1.0, deg: 0, maxDim: 2050, pad: 24, sharp: false, nat: true },
+        { cw: 1.0, ch: 1.0, deg: 0, maxDim: 2050, pad: 26, sharp: true, nat: false },
+        { cw: 0.65, ch: 0.55, deg: 0, maxDim: 1900, pad: 24, sharp: true, nat: true },
+        { cw: 0.96, ch: 0.96, deg: -14, maxDim: 1850, pad: 24, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, deg: 14, maxDim: 1850, pad: 24, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, deg: -28, maxDim: 1850, pad: 24, sharp: true, nat: false },
+        { cw: 0.96, ch: 0.96, deg: 28, maxDim: 1850, pad: 24, sharp: true, nat: false },
+        { cw: 0.98, ch: 0.98, deg: 90, maxDim: 1850, pad: 24, sharp: true, nat: false }
+      ];
+
+      for (let i = 0; i < custPasses.length; i++) {
+        const p = custPasses[i];
+        const sw = Math.max(120, Math.round(bw * p.cw));
+        const sh = Math.max(90, Math.round(bh * p.ch));
+        const sx = Math.max(0, Math.round((bw - sw) / 2));
+        const sy = Math.max(0, Math.round((bh - sh) / 2));
+
+        const maxSide = Math.max(1, Math.max(sw, sh));
+        const minSide = Math.max(1, Math.min(sw, sh));
+        const ratio = (p.sharp && minSide < 820)
+          ? Math.min(2.0, 1080 / minSide)
+          : Math.min(1, p.maxDim / maxSide);
+        const dw = Math.max(180, Math.round(sw * ratio));
+        const dh = Math.max(110, Math.round(sh * ratio));
+        const pad = p.pad || 24;
+        const tw = dw + pad * 2;
+        const th = dh + pad * 2;
+
+        workCanvas.width = tw;
+        workCanvas.height = th;
+        workCtx.fillStyle = '#ffffff';
+        workCtx.fillRect(0, 0, tw, th);
+        workCtx.save();
+        workCtx.translate(tw / 2, th / 2);
+        if (p.deg !== 0) workCtx.rotate((p.deg * Math.PI) / 180);
+        workCtx.drawImage(drawSource, sx, sy, sw, sh, -dw / 2, -dh / 2, dw, dh);
+        workCtx.restore();
+
+        if (p.nat && nativeDetector && p.deg === 0) {
+          try {
+            const natHits = await nativeDetector.detect(workCanvas);
+            if (natHits && natHits.length > 0) {
+              for (let k = 0; k < natHits.length; k++) {
+                const rawV = cleanCustomerBarcode(natHits[k].rawValue);
+                if (rawV) {
+                  if (bmp.close) bmp.close();
+                  return { code: rawV };
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
+        const imgData = workCtx.getImageData(0, 0, tw, th);
+        if (p.sharp) {
+          sharpen1DBarsInPlace(imgData);
+        }
+
+        if (window.ZXingWASM && window.ZXingWASM.readBarcodesFromImageData) {
+          let wasmHits = null;
+          try {
+            wasmHits = await window.ZXingWASM.readBarcodesFromImageData(imgData, WASM_CUSTOMER_1D_OPTIONS);
+          } catch (eOpts) {
+            try {
+              wasmHits = await window.ZXingWASM.readBarcodesFromImageData(imgData, WASM_1D_LOCAL_OPTIONS);
+            } catch (e2) {}
+          }
+          if (wasmHits && wasmHits.length > 0) {
+            for (let k = 0; k < wasmHits.length; k++) {
+              const txt = cleanCustomerBarcode(wasmHits[k].text);
+              if (txt) {
+                if (bmp.close) bmp.close();
+                return { code: txt };
+              }
+            }
+          }
+        }
+
+        const jsEanHit = decodeEan13PureJsFromImageData(imgData);
+        if (jsEanHit && jsEanHit.code) {
+          if (bmp.close) bmp.close();
+          return { code: jsEanHit.code };
+        }
+      }
+      if (bmp.close) bmp.close();
+    } catch (e) {}
+
+    if (file && window.ZXingWASM && window.ZXingWASM.readBarcodes) {
+      try {
+        const direct = await window.ZXingWASM.readBarcodes(file, WASM_CUSTOMER_1D_OPTIONS);
+        if (direct && direct.length > 0 && cleanCustomerBarcode(direct[0].text)) {
+          return { code: cleanCustomerBarcode(direct[0].text) };
+        }
+      } catch (e) {}
+    }
+    return null;
+  }
+
   // =========================================================================
   // OFFLINE-FIRST QUEUE & GOOGLE SHEET AUTO-SYNC WHEN BACK ONLINE
   // =========================================================================
@@ -5351,6 +5796,7 @@
     return {
       id: String(r.id || ''),
       scannedAt: String(r.scannedAt || ''),
+      customerBarcode: cleanCustomerBarcode(r.customerBarcode),
       productCode: cleanCode,
       productName: sheetName,
       grams: Math.round(Number(r.grams)),
@@ -5368,6 +5814,7 @@
       return [
         r.id || '',
         r.scannedAt || '',
+        cleanCustomerBarcode(r.customerBarcode),
         r.productCode || '',
         r.productName || '',
         Math.round(Number(r.grams || 0)),
@@ -5651,6 +6098,7 @@
     const lines = [];
     lines.push([
       'Ngày giờ scan',
+      'Barcode khách hàng',
       'Tên sản phẩm',
       'Mã sản phẩm',
       'Số ký tem vừa scan',
@@ -5674,8 +6122,10 @@
         seen[r.productCode] = true;
         distinctCount += 1;
       }
+      const custClean = cleanCustomerBarcode(r.customerBarcode);
       lines.push([
         r.scannedAt,
+        custClean ? '="' + custClean.replace(/"/g, '""') + '"' : '—',
         r.productName ? r.productName : '—',
         '="' + (r.productCode || '') + '"',
         (r.grams / 1000).toFixed(3),
@@ -5736,6 +6186,20 @@
       ].map(csvEscape).join(','));
     }
 
+    lines.push('');
+    lines.push(['IV. TỔNG HỢP TỒN GỘP THEO BARCODE KHÁCH HÀNG'].map(csvEscape).join(','));
+    lines.push(['STT', 'Barcode khách hàng', 'Phân loại', 'Số tem', 'Tổng số ký (Kg)'].map(csvEscape).join(','));
+    for (let i = 0; i < m.customerGroups.length; i++) {
+      const cg = m.customerGroups[i];
+      lines.push([
+        String(i + 1),
+        cg.hasCustomer ? ('="' + cg.customer.replace(/"/g, '""') + '"') : '—',
+        cg.hasCustomer ? 'Đã gán mã KH' : '— (Bỏ qua mã KH)',
+        String(cg.count),
+        (cg.grams / 1000).toFixed(3)
+      ].map(csvEscape).join(','));
+    }
+
     const bom = '\uFEFF';
     const blob = new Blob([bom + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -5792,6 +6256,40 @@
 
     document.getElementById('btnShutterScan').addEventListener('click', onShutterScanClick);
     document.getElementById('btnToggleTorch').addEventListener('click', toggleCameraTorch);
+
+    const custInpEl = document.getElementById('customerBarcodeInput');
+    if (custInpEl) {
+      custInpEl.addEventListener('input', function (e) {
+        setActiveCustomerBarcode(e.target.value, false);
+      });
+      custInpEl.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          setActiveCustomerBarcode(custInpEl.value, true);
+          custInpEl.blur();
+          if (activeCustomerBarcode) {
+            showBanner('ok', '✅ Đã gán Barcode khách hàng: "' + activeCustomerBarcode + '" — Giờ hãy chụp các tem sản phẩm!');
+          }
+        }
+      });
+    }
+    const btnScanCust = document.getElementById('btnScanCustomerBarcode');
+    if (btnScanCust) {
+      btnScanCust.addEventListener('click', function () {
+        toggleCustomerScanMode();
+        if (customerScanArmed) {
+          showBanner('warn', '🎯 Đưa Barcode khách hàng vào khung rồi bấm nút tròn CHỤP (hoặc bấm "⏭️ Bỏ qua" nếu không cần)!');
+        }
+      });
+    }
+    const btnSkipCust = document.getElementById('btnClearCustomerBarcode');
+    if (btnSkipCust) {
+      btnSkipCust.addEventListener('click', function () {
+        const wasArmedOnly = Boolean(customerScanArmed && !activeCustomerBarcode);
+        setActiveCustomerBarcode('', true);
+        showBanner('ok', wasArmedOnly ? '⏭️ Đã bỏ qua Barcode khách hàng — Chụp thẳng sản phẩm ngay!' : '✕ Đã xóa Barcode khách hàng (về "—") — Tiếp tục chụp sản phẩm!');
+      });
+    }
 
     const camVideoEl = document.getElementById('cameraVideo');
     if (camVideoEl) {
@@ -5923,10 +6421,10 @@
     document.getElementById('btnCopyAppsScript').addEventListener('click', function () {
       const code = window.GOOGLE_APPS_SCRIPT_CODE || '';
       navigator.clipboard.writeText(code).then(function () {
-        showBanner('ok', 'Đã sao chép Mã Kết Nối Google Sheet (có NSX & HSD)!');
+        showBanner('ok', 'Đã sao chép Mã Kết Nối Google Sheet (có Barcode KH + NSX & HSD)!');
         document.getElementById('btnCopyAppsScript').textContent = '✅ Đã sao chép mã!';
         setTimeout(function () {
-          document.getElementById('btnCopyAppsScript').textContent = '📋 Sao chép Mã Kết Nối Google Sheet (Có NSX & HSD)';
+          document.getElementById('btnCopyAppsScript').textContent = '📋 Sao chép Mã Kết Nối Google Sheet (Có Barcode KH + NSX & HSD)';
         }, 3000);
       });
     });
@@ -6001,6 +6499,7 @@
       records = [];
       lastScannedCode = '';
       lastScannedEpoch = 0;
+      setActiveCustomerBarcode('', true);
       persistRecords();
       enqueueOp({ type: 'clear_all' });
       renderAll(false);

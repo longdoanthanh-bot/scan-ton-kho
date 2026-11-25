@@ -96,7 +96,7 @@
       </div>
       <ul>
         <li><strong>Cộng dồn chính xác tuyệt đối theo đơn vị gram nguyên</strong>: Toàn bộ phép cộng, sửa, xóa đều tính bằng số nguyên gram (<code>5198</code> gram) rồi mới chia <code>1.000</code> khi hiển thị, triệt tiêu 100% sai số làm tròn số thập phân.</li>
-        <li><strong>Duy nhất Chế độ Máy Ảnh Chụp Tĩnh 4:3 Một Chạm — Nổi Hình Lên Là Đã Ghi Nhận, Bỏ Qua Nút OK Xác Nhận (Bản v18 Tinh Gọn)</strong>: Loại bỏ hoàn toàn mọi phương thức phụ gây rối (đã gỡ bỏ thanh chọn chế độ PDA, Nhập mã tay, Lô PDA và vòng lặp quét video ngầm gây nóng máy). Hệ thống mở trực tiếp cảm biến chụp ảnh tĩnh tỷ lệ <code>4:3</code> độ nét gốc kết hợp lấy ảnh phần cứng trực tiếp (<code>ImageCapture.takePhoto</code>) + chạm màn hình khóa nét + mức <code>1.5x Nét</code> (và nút <code>🔄 Ống kính</code>): chỉ cần bấm nút tròn <strong>📸 CHỤP</strong> đúng 1 chạm là tấm ảnh vừa chụp <strong>nổi ngay lên đỉnh khung hình</strong> và <strong>tự động đọc trọn gói Mã SP + Tên SP + Số ký + NSX + HSD đẩy thẳng lên Google Sheet <code>SCAN TỒN</code></strong> mà không qua bất kỳ màn hình bấm <code>OK</code> hay hộp thoại hỏi xác nhận nào (kèm nút <code>🗑️ Hủy</code> 1 chạm ngay trên ảnh nổi và nút <code>📚 Tải ảnh có sẵn</code> khi cần tải loạt ảnh từ Thư viện).</li>
+        <li><strong>Trường Quét Barcode Khách Hàng Tùy Chọn Trước Khi Quét Sản Phẩm + Máy Ảnh Chụp Tĩnh 4:3 Một Chạm (Bản v19 Tinh Gọn)</strong>: Ngay phía trên khung máy ảnh bố trí thanh <code>👤 Barcode khách hàng (Không bắt buộc • Có thể bỏ qua)</code>. Nếu không cần gán khách hàng, nhân viên bỏ trống và chụp thẳng tem sản phẩm (hệ thống tự ghi <code>—</code> theo chuẩn Không Tự Đoán). Khi cần chia/kiểm hàng theo khách, nhân viên bấm <code>📷 Quét mã KH</code> → bấm nút tròn <code>📸 CHỤP</code> 1 chạm để đọc mọi chuẩn mã vạch sọc 1D của khách hàng (Code128, Code39, EAN-13, ITF, Codabar... — vẫn khóa cứng mã vuông QR), hệ thống nổi hình xác nhận gán mã khách hàng và <strong>tự động chuyển ngay sang chế độ chụp sản phẩm</strong> (0 nút OK) để gắn mã khách hàng đó cho toàn bộ các tem chụp tiếp theo cho tới khi đổi mã hoặc bấm <code>✕ Bỏ qua</code>.</li>
         <li><strong>Đọc siêu tốc NSX & HSD góc trái dưới cùng trên cả tem B2B Kho phồng cong & tem Bán lẻ (Chống nhầm năm, 100% Offline)</strong>: Tách riêng cột số ngày gọn nhẹ kết hợp cân bằng sáng cục bộ chống lóa nilông & khử sọc màn hình, khóa vật lý chống nhầm chữ số <code>6</code> thành <code>8</code> (loại bỏ hoàn toàn năm tương lai ảo như <code>2028</code>). Nếu lúc mới bấm quét bao bì nhăn che mất ngày, chỉ cần giữ tem trước ống kính là máy tự động đọc bù vào đúng dòng vừa quét (không nhân bản dòng trùng rỗng); nếu hạ máy xuống bàn phím sẽ tự ngắt ngay lập tức.</li>
         <li><strong>Đồng bộ thực tế 2 chiều với Google Sheet (Một người chỉ huy duy nhất)</strong>: Khi xóa hoặc sửa dòng trực tiếp trên bảng tính <code>SCAN TỒN</code>, ứng dụng tự động đối chiếu ngầm mỗi 5 giây (và ngay khi mở lại màn hình) để cập nhật lại danh sách và 3 ô tổng hợp trên điện thoại/PDA khớp 100% với bảng tính thực tế (vẫn bảo toàn tuyệt đối các tem quét lúc mất mạng).</li>
         <li><strong>Nguyên tắc Không Tự Đoán (Fail-Closed)</strong>: Nếu quét bằng tia laser máy PDA chưa điền lô ngày hoặc chữ in trên tem bị rách không đọc được, hệ thống để trống <code>—</code>, tuyệt đối không tự đoán hay bịa ngày tháng.</li>
@@ -140,23 +140,24 @@ flowchart TD
             <td><strong>1. Chi_Tiet_Scan</strong></td>
             <td>
               1. Ngày giờ scan<br>
-              2. Tên sản phẩm<br>
-              3. Mã sản phẩm<br>
-              4. Số ký tem vừa scan<br>
-              5. <strong>NSX</strong> (Ngày sản xuất)<br>
-              6. <strong>HSD</strong> (Hạn sử dụng)<br>
-              7. Tổng số tem đã scan<br>
-              8. Tổng số sản phẩm đã scan<br>
-              9. Tổng số ký đã scan<br>
-              10. Mã vạch gốc / Ghi chú<br>
-              11. Mã dòng đồng bộ
+              2. <strong>Barcode khách hàng</strong> (Tùy chọn — bỏ qua ghi <code>—</code>)<br>
+              3. Tên sản phẩm<br>
+              4. Mã sản phẩm<br>
+              5. Số ký tem vừa scan<br>
+              6. <strong>NSX</strong> (Ngày sản xuất)<br>
+              7. <strong>HSD</strong> (Hạn sử dụng)<br>
+              8. Tổng số tem đã scan<br>
+              9. Tổng số sản phẩm đã scan<br>
+              10. Tổng số ký đã scan<br>
+              11. Mã vạch gốc / Ghi chú<br>
+              12. Mã dòng đồng bộ
             </td>
-            <td>Mỗi lần quét tự động ghi đủ Mã SP, Tên SP, Số ký, NSX & HSD; khi nâng cấp từ bảng cũ sang bảng mới hệ thống tự động di chuyển bảo toàn 100% các dòng đã quét trước đó.</td>
+            <td>Mỗi lần quét tự động ghi đủ Barcode khách hàng (hoặc <code>—</code> nếu bỏ qua), Mã SP, Tên SP, Số ký, NSX &amp; HSD; khi nâng cấp từ bảng 9 cột hoặc 11 cột cũ hệ thống tự động chuyển đổi bảo toàn 100% các dòng đã quét trước đó.</td>
           </tr>
           <tr>
             <td><strong>2. Tong_Hop_Ton</strong></td>
-            <td>4 Ô Tổng quan lớn + <strong>3 Bảng tổng hợp đa chiều</strong>: (I) Chi tiết Theo Mã SKU × Theo Date (NSX / HSD &amp; Tình trạng hạn dùng), (II) Gộp Theo Mã SKU, (III) Gộp Theo Date (sắp xếp hạn dùng sớm lên đầu)</td>
-            <td>Tự động gom nhóm và đối soát chéo khớp 100% tới từng gram giữa cả 3 chiều với trang <code>Chi_Tiet_Scan</code>.</td>
+            <td>4 Ô Tổng quan lớn + <strong>4 Bảng tổng hợp đa chiều</strong>: (I) Chi tiết Theo Mã SKU × Theo Date (NSX / HSD &amp; Tình trạng hạn dùng), (II) Gộp Theo Mã SKU, (III) Gộp Theo Date (sắp xếp hạn dùng sớm lên đầu), (IV) Gộp Theo Barcode Khách Hàng</td>
+            <td>Tự động gom nhóm và đối soát chéo khớp 100% tới từng gram giữa cả 4 chiều với trang <code>Chi_Tiet_Scan</code>.</td>
           </tr>
           <tr>
             <td><strong>3. Danh_Muc_SP</strong></td>
