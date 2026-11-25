@@ -50,6 +50,11 @@ function onEdit(e) {
   } catch (err) {}
 }
 
+function isCustomerHeader(title) {
+  const t = String(title || '').trim().toLowerCase();
+  return t === 'khách hàng' || t === 'barcode khách hàng' || t.indexOf('khách hàng') >= 0;
+}
+
 function sheetNeedsSelfHeal(ss, parsedRecords) {
   try {
     const shDetail = ss.getSheetByName(SHEET_CHI_TIET);
@@ -57,7 +62,7 @@ function sheetNeedsSelfHeal(ss, parsedRecords) {
     if (!shDetail || !shSum) return false;
 
     const col2Title = String(shDetail.getRange(1, 2).getDisplayValue() || '').trim();
-    if (col2Title !== 'Barcode khách hàng') {
+    if (!isCustomerHeader(col2Title)) {
       return true;
     }
 
@@ -241,7 +246,7 @@ function rebuildTotalsAndSummary() {
 function formatDetailHeader(shDetail) {
   const headers = [[
     'Ngày giờ scan',
-    'Barcode khách hàng',
+    'Khách hàng', // Hỗ trợ 3 dạng: Scan mã vạch in sẵn • Tự nhập liệu • Bỏ qua (Barcode khách hàng)
     'Tên sản phẩm',
     'Mã sản phẩm',
     'Số ký tem vừa scan',
@@ -303,7 +308,7 @@ function ensureSheetsExist(ss) {
   } else {
     const col2Title = String(shDetail.getRange(1, 2).getDisplayValue() || '').trim();
     const col5Title = String(shDetail.getRange(1, 5).getDisplayValue() || '').trim();
-    if (col2Title !== 'Barcode khách hàng') {
+    if (!isCustomerHeader(col2Title)) {
       const migratedRecords = (col5Title === 'NSX')
         ? readLegacy11ColRecords(shDetail)
         : readLegacy9ColRecords(shDetail);
@@ -531,7 +536,7 @@ function readAllScanRecords(ss) {
 
   const col2Title = String(sh.getRange(1, 2).getDisplayValue() || '').trim();
   const col5Title = String(sh.getRange(1, 5).getDisplayValue() || '').trim();
-  if (col2Title !== 'Barcode khách hàng') {
+  if (!isCustomerHeader(col2Title)) {
     return (col5Title === 'NSX') ? readLegacy11ColRecords(sh) : readLegacy9ColRecords(sh);
   }
 

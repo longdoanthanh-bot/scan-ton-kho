@@ -1,10 +1,12 @@
-# 📦 HƯỚNG DẪN SỬ DỤNG APP CHỤP TEM TỒN KHO — BẢN v20 (QUY TRÌNH QUÉT MÃ KHÁCH HÀNG TRƯỚC SẢN PHẨM • TỰ ĐỘNG NHẬN DIỆN MÃ KH • THEO DÕI SẢN PHẨM THEO TỪNG KHÁCH)
+# 📦 HƯỚNG DẪN SỬ DỤNG APP CHỤP TEM TỒN KHO — BẢN v21 (CỘT KHÁCH HÀNG 3 DẠNG GHI NHẬN • MÁY ẢNH 1 CHẠM • ĐỒNG BỘ GOOGLE SHEET)
 
-Ứng dụng chuyên biệt trên Điện thoại dùng **cảm biến chụp ảnh tĩnh 4:3 độ nét gốc**, thiết kế **quy trình 2 bước chuẩn hóa**:
-1. **👉 BƯỚC 1**: Quét mã Barcode/QR Code khách hàng (hoặc bỏ qua để chụp thẳng sản phẩm).
-2. **👉 BƯỚC 2**: Chụp các sản phẩm thuộc về khách hàng đó — máy **tự động ghi nhận danh sách sản phẩm, số tem, số ký và lô hạn dùng (date) riêng cho từng khách**.
-3. **Cơ chế Tự Động Nhận Diện Kép (Dual-Auto-Detect)**: Nếu người dùng quên bấm nút "Quét mã KH" mà đưa camera vào Barcode/QR Code khách hàng rồi bấm chụp, máy **tự động phân biệt mã khách và kích hoạt khách hàng ngay tức khắc** mà không báo lỗi!
-4. **Bấm chụp 1 chạm là nổi hình vừa chụp lên màn hình và TỰ ĐỘNG GHI NHẬN ngay lập tức** (**bỏ qua hoàn toàn màn hình bấm nút `OK / Sử dụng ảnh`**), tự lấy trọn **Mã khách hàng + Mã sản phẩm + Tên hàng + Số ký + NSX + HSD**, hoạt động **100% cả khi mất mạng** và **tự động đồng bộ 2 chiều với Google Sheet `SCAN TỒN`**.
+Ứng dụng chuyên biệt trên Điện thoại dùng **cảm biến chụp ảnh tĩnh 4:3 độ nét gốc**, thiết kế **3 Dạng ghi nhận Khách hàng linh hoạt**:
+1. **👉 Dạng 1: Quét mã vạch in sẵn**: Bấm nút **`📷 Quét mã KH`** → Đưa mã vạch hoặc mã vuông QR Code trên phiếu xuất/tem in sẵn vào khung → Bấm nút tròn **`📸 CHỤP`**.
+2. **👉 Dạng 2: Tự nhập liệu (Gõ tay)**: Chạm vào ô nhập liệu **`Gõ tên/mã KH...`** → Gõ trực tiếp bằng bàn phím (ví dụ: `KH-VINMART`, `ĐẠI LÝ AN PHÁT`) → Bấm nút **`💾 Ghi nhận`** (hoặc nhấn phím Enter). Hoặc bấm chọn nhanh từ các chip **`🏷️ Khách đã có`**!
+3. **👉 Dạng 3: Bỏ qua (Không bắt buộc)**: Để trống hoặc bấm **`⏭️ Bỏ qua`** → Chụp thẳng tem sản phẩm bình thường! Cột khách hàng trên ứng dụng và Google Sheet sẽ tự động ghi nhận là **`—`** (chưa gán khách).
+4. **Vị trí lưu trữ dữ liệu trên Google Sheet "SCAN TỒN"**:
+   - **Trang `Chi_Tiet_Scan`**: Lưu ngay tại **Cột B — Khách hàng** (đứng trước cột *Tên sản phẩm*).
+   - **Trang `Tong_Hop_Ton`**: Lưu tại **Bảng IV — TỔNG HỢP TỒN GỘP THEO KHÁCH HÀNG** (tự động gom số tem, số ký và danh mục hàng theo từng khách).
 
 ---
 

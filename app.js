@@ -74,7 +74,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v20';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v21';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -807,8 +807,10 @@
     const inp = document.getElementById('customerBarcodeInput');
     const chip = document.getElementById('customerActiveChip');
     const btnScan = document.getElementById('btnScanCustomerBarcode');
+    const btnSave = document.getElementById('btnSaveCustomerInput');
     const btnNext = document.getElementById('btnNextCustomer');
     const btnSkip = document.getElementById('btnClearCustomerBarcode');
+    const quickPills = document.getElementById('customerQuickPills');
     const viewportBox = document.getElementById('cameraViewportBox');
     const aimTop = document.getElementById('aimZoneTop');
     const aimBottom = document.getElementById('aimZoneBottom');
@@ -826,19 +828,41 @@
       bar.classList.toggle('has-value', Boolean(!customerScanArmed && activeCustomerBarcode));
     }
 
+    // Hiển thị dòng gợi ý 3 cách hoặc danh sách khách đã có để chọn nhanh 1 chạm
+    if (quickPills) {
+      const custSet = {};
+      for (let i = 0; i < records.length; i++) {
+        const c = cleanCustomerBarcode(records[i].customerBarcode);
+        if (c) custSet[c] = (custSet[c] || 0) + 1;
+      }
+      const custArr = Object.keys(custSet);
+      if (custArr.length > 0) {
+        let html = '<span class="pill-label">🏷️ Khách đã có:</span>';
+        custArr.forEach(function (name) {
+          const isSel = (name === cleanCustomerBarcode(activeCustomerBarcode));
+          html += '<button type="button" class="cust-pill-chip' + (isSel ? ' is-active' : '') + '" data-cust="' + escapeHtml(name) + '">' +
+            escapeHtml(name) + ' (' + custSet[name] + ' tem)' +
+          '</button>';
+        });
+        quickPills.innerHTML = html;
+      } else {
+        quickPills.innerHTML = '<span style="color:#64748b;font-size:11px;">💡 <strong>3 Cách ghi nhận:</strong> 📷 Quét tem in sẵn • 💾 Gõ tay rồi bấm Lưu • ⏭️ Bỏ qua (hiển thị "—")</span>';
+      }
+    }
+
     if (customerScanArmed) {
       if (stepInd) {
         stepInd.textContent = '🎯 BƯỚC 1';
       }
       if (barTitle) {
-        barTitle.innerHTML = 'Quét Mã Khách Hàng <span class="customer-opt-tag">(Ngắm vào mã KH rồi bấm Chụp)</span>';
+        barTitle.innerHTML = 'Khách Hàng <span class="customer-opt-tag">(Đang ngắm mã vạch in sẵn)</span>';
       }
       if (chip) {
         chip.style.display = 'inline-block';
         chip.textContent = '🎯 Đang ngắm mã KH';
       }
       if (btnScan) {
-        btnScan.textContent = '🎯 Đang quét KH';
+        btnScan.textContent = '🎯 Đang quét mã';
       }
       if (btnNext) {
         btnNext.style.display = 'none';
@@ -854,10 +878,10 @@
         viewportBox.classList.add('is-customer-mode');
       }
       if (aimTop) {
-        aimTop.textContent = '👤 ĐANG QUÉT BARCODE KHÁCH HÀNG (BẤM NÚT TRÒN ĐỂ GÁN)';
+        aimTop.textContent = '👤 ĐANG QUÉT MÃ KHÁCH HÀNG (BẤM NÚT TRÒN ĐỂ GÁN)';
       }
       if (aimBottom) {
-        aimBottom.textContent = 'Ngắm mã vạch hoặc QR khách hàng → Bấm nút tròn CHỤP (hoặc bấm "⏭️ Bỏ qua")';
+        aimBottom.textContent = 'Ngắm mã vạch in sẵn hoặc QR khách hàng → Bấm nút tròn CHỤP (hoặc bấm "⏭️ Bỏ qua")';
       }
     } else if (activeCustomerBarcode) {
       const custMet = getActiveCustomerMetrics();
@@ -905,17 +929,17 @@
         viewportBox.classList.remove('is-customer-mode');
       }
       if (aimTop) {
-        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v20 • ĐANG GÁN KH: ' + activeCustomerBarcode;
+        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v21 • ĐANG GÁN KH: ' + activeCustomerBarcode;
       }
       if (aimBottom) {
         aimBottom.textContent = 'Bấm nút tròn Chụp tem sản phẩm → Nổi hình là TỰ ĐỘNG GHI NHẬN cho khách ' + activeCustomerBarcode + '!';
       }
     } else {
       if (stepInd) {
-        stepInd.textContent = '1️⃣ Bước 1';
+        stepInd.textContent = '👤 Bước 1';
       }
       if (barTitle) {
-        barTitle.innerHTML = 'Quét Mã Khách Hàng <span class="customer-opt-tag">(Trước khi quét SP)</span>';
+        barTitle.innerHTML = 'Khách Hàng <span class="customer-opt-tag">(3 Cách: Quét mã • Nhập tay • Bỏ qua)</span>';
       }
       if (chip) {
         chip.style.display = 'none';
@@ -936,7 +960,7 @@
         viewportBox.classList.remove('is-customer-mode');
       }
       if (aimTop) {
-        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v20 • CHẠM MÀN HÌNH LẤY NÉT';
+        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v21 • CHẠM MÀN HÌNH LẤY NÉT';
       }
       if (aimBottom) {
         aimBottom.textContent = 'Bấm nút tròn Chụp → Nổi hình lên là ĐÃ GHI NHẬN (Không cần bấm OK)';
@@ -6489,29 +6513,69 @@
       custInpEl.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
           e.preventDefault();
-          setActiveCustomerBarcode(custInpEl.value, true);
+          const clean = cleanCustomerBarcode(custInpEl.value);
+          setActiveCustomerBarcode(clean, true);
           custInpEl.blur();
-          if (activeCustomerBarcode) {
-            showBanner('ok', '✅ Đã gán Barcode khách hàng: "' + activeCustomerBarcode + '" — Giờ hãy chụp các tem sản phẩm!');
+          if (clean) {
+            showBanner('ok', '✅ Đã ghi nhận Khách hàng: "' + clean + '" (Tự nhập tay) — Giờ hãy chụp các tem sản phẩm!');
+          } else {
+            showBanner('ok', '⏭️ Đã để trống Khách hàng (hiển thị "—") — Chụp sản phẩm ngay!');
           }
         }
       });
     }
+
+    // Nút Lưu / Ghi nhận khi người dùng gõ tay khách hàng (Cách 2)
+    const btnSaveCust = document.getElementById('btnSaveCustomerInput');
+    if (btnSaveCust) {
+      btnSaveCust.addEventListener('click', function () {
+        const inpVal = (document.getElementById('customerBarcodeInput') || {}).value || '';
+        const clean = cleanCustomerBarcode(inpVal);
+        if (clean) {
+          setActiveCustomerBarcode(clean, true);
+          showBanner('ok', '✅ Đã ghi nhận Khách hàng: "' + clean + '" (Tự nhập tay) — Giờ hãy chụp các tem sản phẩm!');
+        } else {
+          showBanner('warn', '⚠️ Hãy gõ tên hoặc mã khách vào ô, hoặc bấm "📷 Quét mã KH" / "⏭️ Bỏ qua"!');
+        }
+      });
+    }
+
+    // Nút Chụp quét mã vạch in sẵn của khách (Cách 1)
     const btnScanCust = document.getElementById('btnScanCustomerBarcode');
     if (btnScanCust) {
       btnScanCust.addEventListener('click', function () {
         toggleCustomerScanMode();
         if (customerScanArmed) {
-          showBanner('warn', '🎯 Đưa Barcode khách hàng vào khung rồi bấm nút tròn CHỤP (hoặc bấm "⏭️ Bỏ qua" nếu không cần)!');
+          showBanner('warn', '🎯 Đưa mã vạch in sẵn của khách hàng vào khung rồi bấm nút tròn CHỤP (hoặc bấm "⏭️ Bỏ qua" nếu không cần)!');
         }
       });
     }
+
+    // Nút Bỏ qua / Xóa khách hàng (Cách 3)
     const btnSkipCust = document.getElementById('btnClearCustomerBarcode');
     if (btnSkipCust) {
       btnSkipCust.addEventListener('click', function () {
-        const wasArmedOnly = Boolean(customerScanArmed && !activeCustomerBarcode);
+        const hadCust = Boolean(activeCustomerBarcode);
         setActiveCustomerBarcode('', true);
-        showBanner('ok', wasArmedOnly ? '⏭️ Đã bỏ qua Barcode khách hàng — Chụp thẳng sản phẩm ngay!' : '✕ Đã xóa Barcode khách hàng (về "—") — Tiếp tục chụp sản phẩm!');
+        if (hadCust) {
+          showBanner('ok', '✕ Đã xóa Khách hàng (về "—") — Tiếp tục chụp sản phẩm!');
+        } else {
+          showBanner('ok', '⏭️ Đã chọn BỎ QUA Khách hàng (hiển thị "—") — Chụp thẳng sản phẩm ngay!');
+        }
+      });
+    }
+
+    // Bấm vào chip gợi ý khách đã có để chọn nhanh 1 chạm
+    const qpEl = document.getElementById('customerQuickPills');
+    if (qpEl) {
+      qpEl.addEventListener('click', function (e) {
+        const chipBtn = e.target.closest('.cust-pill-chip');
+        if (!chipBtn) return;
+        const custVal = chipBtn.getAttribute('data-cust');
+        if (custVal) {
+          setActiveCustomerBarcode(custVal, true);
+          showBanner('ok', '✅ Đã chọn Khách hàng: "' + custVal + '" — Giờ hãy chụp các tem sản phẩm!');
+        }
       });
     }
 

@@ -1523,11 +1523,29 @@ html, body {
   font-weight: 800;
   white-space: nowrap;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .customer-scan-bar.is-armed .customer-scan-btn {
   background: #d97706;
   color: #ffffff;
+}
+
+.customer-save-btn {
+  background: #059669;
+  color: #ffffff;
+  border: none;
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.customer-save-btn:active {
+  background: #047857;
 }
 
 .customer-next-btn {
@@ -1548,15 +1566,60 @@ html, body {
 }
 
 .customer-skip-btn {
-  background: #fee2e2;
-  color: #b91c1c;
-  border: 1px solid #fca5a5;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
   border-radius: 9px;
   padding: 8px 9px;
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.customer-skip-btn:hover, .customer-skip-btn:active {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.customer-quick-pills {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 6px;
+  font-size: 11.5px;
+  color: #64748b;
+}
+
+.customer-quick-pills .pill-label {
+  font-weight: 700;
+  color: #334155;
+}
+
+.cust-pill-chip {
+  background: #e0f2fe;
+  color: #0369a1;
+  border: 1px solid #bae6fd;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.cust-pill-chip:active {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.cust-pill-chip.is-active {
+  background: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
 }
 
 .customer-products-summary-box {
