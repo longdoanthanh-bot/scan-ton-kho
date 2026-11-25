@@ -30,9 +30,9 @@
     maxNumberOfSymbols: 2
   };
 
-  // Tùy chọn giải mã mọi loại Barcode 1D cho trường Barcode khách hàng (Code128, Code39, Code93, Codabar, EAN-13, EAN-8, ITF, UPC-A — tuyệt đối khóa cứng mã vuông 2D)
+  // Tùy chọn giải mã mọi loại Barcode 1D + QR Code cho trường Barcode khách hàng (Code128, Code39, Code93, Codabar, EAN-13, EAN-8, ITF, UPC-A, QRCode)
   const WASM_CUSTOMER_1D_OPTIONS = {
-    formats: ['Code128', 'Code39', 'Code93', 'Codabar', 'EAN-13', 'EAN-8', 'ITF', 'UPC-A'],
+    formats: ['Code128', 'Code39', 'Code93', 'Codabar', 'EAN-13', 'EAN-8', 'ITF', 'UPC-A', 'QRCode'],
     tryHarder: true,
     tryRotate: true,
     tryInvert: true,
@@ -71,8 +71,10 @@
   let currentSummaryDim = 'sku_date';
   let activeCustomerBarcode = '';
   let customerScanArmed = false;
+  let activeRecordCustomerFilter = 'ALL';
+  let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v19';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v20';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -193,6 +195,38 @@
     return nativeDetectorInitPromise;
   }
 
+  let nativeCustomerDetector = null;
+  let nativeCustomerDetectorInitPromise = null;
+  function ensureNativeCustomerDetector() {
+    if (!('BarcodeDetector' in window) || !window.BarcodeDetector) {
+      nativeCustomerDetector = null;
+      nativeCustomerDetectorInitPromise = null;
+      return Promise.resolve(null);
+    }
+    const Ctor = window.BarcodeDetector;
+    if (nativeCustomerDetector && nativeCustomerDetector._ctor === Ctor) return Promise.resolve(nativeCustomerDetector);
+    if (nativeCustomerDetector && nativeCustomerDetector._ctor !== Ctor) {
+      nativeCustomerDetector = null;
+      nativeCustomerCustomerDetectorInitPromise = null;
+    }
+    if (nativeCustomerDetectorInitPromise) return nativeCustomerDetectorInitPromise;
+    nativeCustomerDetectorInitPromise = Ctor.getSupportedFormats().then(function (supported) {
+      const formatsCust = ['code_128', 'code_39', 'code_93', 'codabar', 'ean_13', 'ean_8', 'itf', 'upc_a', 'upc_e', 'qr_code'].filter(function (f) {
+        return supported.indexOf(f) !== -1;
+      });
+      if (formatsCust.length > 0) {
+        nativeCustomerDetector = new Ctor({ formats: formatsCust });
+        try { nativeCustomerDetector._ctor = Ctor; } catch (e) {}
+      }
+      nativeCustomerDetectorInitPromise = null;
+      return nativeCustomerDetector;
+    }).catch(function () {
+      nativeCustomerDetectorInitPromise = null;
+      return null;
+    });
+    return nativeCustomerDetectorInitPromise;
+  }
+
   function warmUpWasmEngine() {
     ensureNativeBarcodeDetector();
     if (wasmReadyPromise) return wasmReadyPromise;
@@ -297,8 +331,8 @@
     if (singleScanActive || pendingSnapJobsCount > 0 || batchProcessingActive || activeDateReadsCount > 0 || syncInProgress || pendingOps.length > 0) return;
     pendingSwReload = false;
     try {
-      if (sessionStorage.getItem('sw_reloaded_v19') === '1') return;
-      sessionStorage.setItem('sw_reloaded_v19', '1');
+      if (sessionStorage.getItem('sw_reloaded_v20') === '1') return;
+      sessionStorage.setItem('sw_reloaded_v20', '1');
     } catch (e) {}
     window.location.reload();
   }
@@ -309,7 +343,7 @@
       return;
     }
     const hadPreviousController = Boolean(navigator.serviceWorker.controller);
-    navigator.serviceWorker.register('./sw.js?v=19', { updateViaCache: 'none' }).then(function (reg) {
+    navigator.serviceWorker.register('./sw.js?v=20', { updateViaCache: 'none' }).then(function (reg) {
       if (reg.waiting) {
         reg.waiting.postMessage('SKIP_WAITING');
       }
@@ -335,8 +369,8 @@
         return;
       }
       try {
-        if (sessionStorage.getItem('sw_reloaded_v19') === '1') return;
-        sessionStorage.setItem('sw_reloaded_v19', '1');
+        if (sessionStorage.getItem('sw_reloaded_v20') === '1') return;
+        sessionStorage.setItem('sw_reloaded_v20', '1');
       } catch (e) {}
       window.location.reload();
     });
@@ -733,15 +767,56 @@
     syncCustomerScanBarUI();
   }
 
+  function getActiveCustomerMetrics() {
+    if (!activeCustomerBarcode) return { count: 0, grams: 0, items: [] };
+    const cleanActive = cleanCustomerBarcode(activeCustomerBarcode);
+    const skuMap = {};
+    let count = 0;
+    let grams = 0;
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      if (cleanCustomerBarcode(r.customerBarcode) === cleanActive) {
+        count += 1;
+        grams += (r.grams || 0);
+        const codeKey = r.productCode || 'UNKNOWN';
+        if (!skuMap[codeKey]) {
+          skuMap[codeKey] = {
+            code: r.productCode || '—',
+            name: r.productName || '',
+            count: 0,
+            grams: 0,
+            lots: {}
+          };
+        }
+        skuMap[codeKey].count += 1;
+        skuMap[codeKey].grams += (r.grams || 0);
+        if (r.productName && !skuMap[codeKey].name) skuMap[codeKey].name = r.productName;
+        const lotKey = (r.nsx || r.hsd) ? (formatLotDateDisplay(r.nsx) + ' ➜ ' + formatLotDateDisplay(r.hsd)) : '';
+        if (lotKey) {
+          skuMap[codeKey].lots[lotKey] = (skuMap[codeKey].lots[lotKey] || 0) + 1;
+        }
+      }
+    }
+    const items = Object.keys(skuMap).map(function (k) { return skuMap[k]; });
+    items.sort(function (a, b) { return b.grams - a.grams; });
+    return { count: count, grams: grams, items: items };
+  }
+
   function syncCustomerScanBarUI() {
     const bar = document.getElementById('customerScanBar');
     const inp = document.getElementById('customerBarcodeInput');
     const chip = document.getElementById('customerActiveChip');
     const btnScan = document.getElementById('btnScanCustomerBarcode');
+    const btnNext = document.getElementById('btnNextCustomer');
     const btnSkip = document.getElementById('btnClearCustomerBarcode');
     const viewportBox = document.getElementById('cameraViewportBox');
     const aimTop = document.getElementById('aimZoneTop');
     const aimBottom = document.getElementById('aimZoneBottom');
+    const stepInd = document.getElementById('customerStepIndicator');
+    const barTitle = document.getElementById('customerBarTitle');
+    const prodBox = document.getElementById('customerProductsSummaryBox');
+    const prodHeadTxt = document.getElementById('custProdHeadText');
+    const prodListContent = document.getElementById('custProdListContent');
 
     if (inp && document.activeElement !== inp && inp.value !== activeCustomerBarcode) {
       inp.value = activeCustomerBarcode;
@@ -750,53 +825,120 @@
       bar.classList.toggle('is-armed', Boolean(customerScanArmed));
       bar.classList.toggle('has-value', Boolean(!customerScanArmed && activeCustomerBarcode));
     }
-    if (chip) {
-      if (customerScanArmed) {
-        chip.style.display = 'inline-block';
-        chip.textContent = '🎯 Chờ chụp mã KH';
-      } else if (activeCustomerBarcode) {
-        chip.style.display = 'inline-block';
-        chip.textContent = '✅ KH: ' + activeCustomerBarcode;
-      } else {
-        chip.style.display = 'none';
+
+    if (customerScanArmed) {
+      if (stepInd) {
+        stepInd.textContent = '🎯 BƯỚC 1';
       }
-    }
-    if (btnScan) {
-      if (customerScanArmed) {
+      if (barTitle) {
+        barTitle.innerHTML = 'Quét Mã Khách Hàng <span class="customer-opt-tag">(Ngắm vào mã KH rồi bấm Chụp)</span>';
+      }
+      if (chip) {
+        chip.style.display = 'inline-block';
+        chip.textContent = '🎯 Đang ngắm mã KH';
+      }
+      if (btnScan) {
         btnScan.textContent = '🎯 Đang quét KH';
-      } else if (activeCustomerBarcode) {
-        btnScan.textContent = '📷 Đổi mã KH';
-      } else {
-        btnScan.textContent = '📷 Quét mã KH';
       }
-    }
-    if (btnSkip) {
-      if (customerScanArmed) {
+      if (btnNext) {
+        btnNext.style.display = 'none';
+      }
+      if (btnSkip) {
         btnSkip.style.display = 'inline-flex';
         btnSkip.textContent = '⏭️ Bỏ qua';
-      } else if (activeCustomerBarcode) {
+      }
+      if (prodBox) {
+        prodBox.style.display = 'none';
+      }
+      if (viewportBox) {
+        viewportBox.classList.add('is-customer-mode');
+      }
+      if (aimTop) {
+        aimTop.textContent = '👤 ĐANG QUÉT BARCODE KHÁCH HÀNG (BẤM NÚT TRÒN ĐỂ GÁN)';
+      }
+      if (aimBottom) {
+        aimBottom.textContent = 'Ngắm mã vạch hoặc QR khách hàng → Bấm nút tròn CHỤP (hoặc bấm "⏭️ Bỏ qua")';
+      }
+    } else if (activeCustomerBarcode) {
+      const custMet = getActiveCustomerMetrics();
+      if (stepInd) {
+        stepInd.textContent = '2️⃣ BƯỚC 2';
+      }
+      if (barTitle) {
+        barTitle.innerHTML = 'Khách: <strong>' + escapeHtml(activeCustomerBarcode) + '</strong> <span class="customer-opt-tag">(Chụp các sản phẩm cho khách này)</span>';
+      }
+      if (chip) {
+        chip.style.display = 'inline-block';
+        chip.textContent = '👤 ' + activeCustomerBarcode + ' (' + custMet.count + ' tem)';
+      }
+      if (btnScan) {
+        btnScan.textContent = '📷 Đổi mã KH';
+      }
+      if (btnNext) {
+        btnNext.style.display = 'inline-flex';
+      }
+      if (btnSkip) {
         btnSkip.style.display = 'inline-flex';
         btnSkip.textContent = '✕ Bỏ qua';
-      } else {
+      }
+      if (prodBox) {
+        prodBox.style.display = 'block';
+        if (prodHeadTxt) {
+          prodHeadTxt.innerHTML = '📦 Đã gán cho khách này: <strong>' + custMet.count + ' tem • ' + formatKg(custMet.grams) + ' Kg</strong>';
+        }
+        if (prodListContent) {
+          if (custMet.items.length === 0) {
+            prodListContent.innerHTML = '<div style="color:#64748b;font-style:italic;">Chưa có sản phẩm nào cho khách này — Hãy bấm nút tròn CHỤP các tem hàng!</div>';
+          } else {
+            prodListContent.innerHTML = custMet.items.map(function (it) {
+              const lotsArr = Object.keys(it.lots);
+              const lotStr = lotsArr.length > 0 ? (' • ' + lotsArr.join(', ')) : '';
+              return '<div class="cust-prod-row">' +
+                '<span><strong>' + escapeHtml(it.code) + '</strong> - ' + escapeHtml(it.name || '—') + lotStr + '</span>' +
+                '<span style="font-weight:800;color:#15803d;">' + it.count + ' tem • ' + formatKg(it.grams) + ' Kg</span>' +
+              '</div>';
+            }).join('');
+          }
+        }
+      }
+      if (viewportBox) {
+        viewportBox.classList.remove('is-customer-mode');
+      }
+      if (aimTop) {
+        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v20 • ĐANG GÁN KH: ' + activeCustomerBarcode;
+      }
+      if (aimBottom) {
+        aimBottom.textContent = 'Bấm nút tròn Chụp tem sản phẩm → Nổi hình là TỰ ĐỘNG GHI NHẬN cho khách ' + activeCustomerBarcode + '!';
+      }
+    } else {
+      if (stepInd) {
+        stepInd.textContent = '1️⃣ Bước 1';
+      }
+      if (barTitle) {
+        barTitle.innerHTML = 'Quét Mã Khách Hàng <span class="customer-opt-tag">(Trước khi quét SP)</span>';
+      }
+      if (chip) {
+        chip.style.display = 'none';
+      }
+      if (btnScan) {
+        btnScan.textContent = '📷 Quét mã KH';
+      }
+      if (btnNext) {
+        btnNext.style.display = 'none';
+      }
+      if (btnSkip) {
         btnSkip.style.display = 'none';
       }
-    }
-    if (viewportBox) {
-      viewportBox.classList.toggle('is-customer-mode', Boolean(customerScanArmed));
-    }
-    if (aimTop) {
-      if (customerScanArmed) {
-        aimTop.textContent = '👤 ĐANG QUÉT BARCODE KHÁCH HÀNG (CÓ THỂ BẤM BỎ QUA)';
-      } else if (activeCustomerBarcode) {
-        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v19 • ĐANG GÁN KH: ' + activeCustomerBarcode;
-      } else {
-        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v19 • CHẠM MÀN HÌNH LẤY NÉT';
+      if (prodBox) {
+        prodBox.style.display = 'none';
       }
-    }
-    if (aimBottom) {
-      if (customerScanArmed) {
-        aimBottom.textContent = 'Đưa mã vạch Khách hàng vào khung → Bấm nút tròn CHỤP (Nổi hình = Đã gán!)';
-      } else {
+      if (viewportBox) {
+        viewportBox.classList.remove('is-customer-mode');
+      }
+      if (aimTop) {
+        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v20 • CHẠM MÀN HÌNH LẤY NÉT';
+      }
+      if (aimBottom) {
         aimBottom.textContent = 'Bấm nút tròn Chụp → Nổi hình lên là ĐÃ GHI NHẬN (Không cần bấm OK)';
       }
     }
@@ -2917,11 +3059,16 @@
           code: code,
           name: r.productName ? r.productName : null,
           count: 0,
-          grams: 0
+          grams: 0,
+          dateLots: {}
         };
       }
       if (!byCustomer[custKey].skuMap[code].name && r.productName) {
         byCustomer[custKey].skuMap[code].name = r.productName;
+      }
+      if (hasDate) {
+        const lotKey = nsxDisp + ' → ' + hsdDisp;
+        byCustomer[custKey].skuMap[code].dateLots[lotKey] = true;
       }
       byCustomer[custKey].skuMap[code].count += 1;
       byCustomer[custKey].skuMap[code].grams += g;
@@ -3086,7 +3233,47 @@
     }
   }
 
+  function renderCustomerFilterBarUI(m) {
+    const bar = document.getElementById('customerFilterBar');
+    if (!bar) return;
+    if (!m || !m.customerGroups || (m.customerGroups.length <= 1 && (!m.customerGroups[0] || !m.customerGroups[0].hasCustomer))) {
+      bar.style.display = 'none';
+      bar.innerHTML = '';
+      return;
+    }
+    bar.style.display = 'flex';
+    const pills = [];
+    const isAll = (activeRecordCustomerFilter === 'ALL');
+    pills.push(
+      '<button type="button" class="cust-filter-pill' + (isAll ? ' active' : '') + '" onclick="window.AppActions.filterCustomer(\'ALL\')">' +
+        'Tất cả (' + m.totalScans + ')' +
+      '</button>'
+    );
+    for (let i = 0; i < m.customerGroups.length; i++) {
+      const cg = m.customerGroups[i];
+      if (cg.hasCustomer) {
+        const isActive = (activeRecordCustomerFilter === cg.customer);
+        pills.push(
+          '<button type="button" class="cust-filter-pill' + (isActive ? ' active' : '') + '" onclick="window.AppActions.filterCustomer(\'' + escapeHtml(cg.customer).replace(/'/g, "\\'") + '\')">' +
+            '👤 ' + escapeHtml(cg.customer) + ' (' + cg.count + ')' +
+          '</button>'
+        );
+      } else {
+        const isActive = (activeRecordCustomerFilter === '__EMPTY__');
+        pills.push(
+          '<button type="button" class="cust-filter-pill' + (isActive ? ' active' : '') + '" onclick="window.AppActions.filterCustomer(\'__EMPTY__\')">' +
+            '👤 Chưa gán (' + cg.count + ')' +
+          '</button>'
+        );
+      }
+    }
+    bar.innerHTML = pills.join('');
+  }
+
   function renderScanLists() {
+    const m = computeMetrics();
+    renderCustomerFilterBarUI(m);
+
     const recentContainer = document.getElementById('recentScansPreview');
     const recentSlice = records.slice(-5).reverse();
     if (recentSlice.length === 0) {
@@ -3105,8 +3292,16 @@
     }).reverse();
 
     const filtered = reversedAll.filter(function (item) {
-      if (!query) return true;
       const r = item.rec;
+      const custClean = cleanCustomerBarcode(r.customerBarcode);
+      if (activeRecordCustomerFilter !== 'ALL') {
+        if (activeRecordCustomerFilter === '__EMPTY__') {
+          if (custClean !== '') return false;
+        } else {
+          if (custClean !== activeRecordCustomerFilter) return false;
+        }
+      }
+      if (!query) return true;
       return (
         String(r.customerBarcode || '').toLowerCase().indexOf(query) !== -1 ||
         String(r.productCode || '').toLowerCase().indexOf(query) !== -1 ||
@@ -3119,7 +3314,7 @@
     });
 
     if (filtered.length === 0) {
-      fullContainer.innerHTML = '<div style="text-align:center;color:#64748b;padding:18px;font-size:13.5px;">Không tìm thấy dòng quét nào phù hợp.</div>';
+      fullContainer.innerHTML = '<div style="text-align:center;color:#64748b;padding:18px;font-size:13.5px;">Không tìm thấy dòng quét nào phù hợp' + (activeRecordCustomerFilter !== 'ALL' ? ' cho khách hàng này.' : '.') + '</div>';
     } else {
       fullContainer.innerHTML = filtered.map(function (item) {
         return buildScanRowHtml(item.rec, item.num);
@@ -3291,7 +3486,11 @@
         const sList = Object.keys(cg.skuMap).map(function (k) { return cg.skuMap[k]; });
         sList.sort(function (a, b) { return b.grams - a.grams; });
         const skuLines = sList.map(function (s) {
-          return escapeHtml(s.code + ' - ' + (s.name || '—') + ' (' + s.count + ' tem • ' + formatKg(s.grams) + ' Kg)');
+          const lotsArr = Object.keys(s.dateLots || {});
+          const lotStr = lotsArr.length > 0
+            ? (' <span style="color:#0284c7;font-weight:700;">[Lô Date: ' + escapeHtml(lotsArr.join(', ')) + ']</span>')
+            : '';
+          return '• ' + escapeHtml(s.code + ' - ' + (s.name || '—') + ': ' + s.count + ' tem • ' + formatKg(s.grams) + ' Kg') + lotStr;
         }).join('<br>');
         const custCell = cg.hasCustomer
           ? ('<span class="scan-cust-badge">👤 ' + escapeHtml(cg.customer) + '</span>')
@@ -4128,9 +4327,31 @@
         }
 
         // Trường hợp B: Chụp tem bình thường -> Giải mã mã vạch 1D 13 số (khóa cứng QR Code!) + Đọc trọn NSX & HSD rồi GHI NHẬN TỰ ĐỘNG!
-        const hit = await decodePhotoInBrowserWasm(hwBlob, workCanvas);
+        let hit = await decodePhotoInBrowserWasm(hwBlob, workCanvas);
+        let parsed = (hit && hit.code) ? parseSingle13DigitScaleBarcode(hit.code) : null;
+
+        // DUAL-AUTO-DETECT: Nếu người dùng chụp dải Barcode hoặc QR Code khách hàng (phiếu xuất/hóa đơn) mà không bấm nút "Quét mã KH" trước
+        if (!parsed || !parsed.ok) {
+          const autoCustHit = await decodeCustomer1DBarcode(hwBlob, workCanvas);
+          const autoCustCode = autoCustHit ? cleanCustomerBarcode(autoCustHit.code) : '';
+          if (autoCustCode) {
+            setActiveCustomerBarcode(autoCustCode, true);
+            playBeep('ok');
+            vibrateDevice([40, 60, 40]);
+            updateSnapPopCardUI({
+              stateClass: 'state-ok',
+              thumbSrc: finalThumb,
+              badge: '✅ ĐÃ TỰ ĐỘNG NHẬN DIỆN MÃ KHÁCH HÀNG!',
+              title: '👤 Khách hàng: ' + autoCustCode,
+              dates: '👉 BƯỚC 2: BÂY GIỜ HÃY CHỤP CÁC SẢN PHẨM CỦA KHÁCH NÀY!',
+              recordId: null
+            });
+            showBanner('ok', '✅ Tự động nhận diện Khách hàng: "' + autoCustCode + '" — Giờ hãy chụp các sản phẩm cho khách này!');
+            return;
+          }
+        }
+
         if (hit && hit.code) {
-          const parsed = parseSingle13DigitScaleBarcode(hit.code);
           if (!parsed.ok) {
             playBeep('error');
             updateSnapPopCardUI({
@@ -5666,19 +5887,22 @@
         workCtx.drawImage(drawSource, sx, sy, sw, sh, -dw / 2, -dh / 2, dw, dh);
         workCtx.restore();
 
-        if (p.nat && nativeDetector && p.deg === 0) {
-          try {
-            const natHits = await nativeDetector.detect(workCanvas);
-            if (natHits && natHits.length > 0) {
-              for (let k = 0; k < natHits.length; k++) {
-                const rawV = cleanCustomerBarcode(natHits[k].rawValue);
-                if (rawV) {
-                  if (bmp.close) bmp.close();
-                  return { code: rawV };
+        if (p.nat && p.deg === 0) {
+          const natDet = await ensureNativeCustomerDetector();
+          if (natDet) {
+            try {
+              const natHits = await natDet.detect(workCanvas);
+              if (natHits && natHits.length > 0) {
+                for (let k = 0; k < natHits.length; k++) {
+                  const rawV = cleanCustomerBarcode(natHits[k].rawValue);
+                  if (rawV) {
+                    if (bmp.close) bmp.close();
+                    return { code: rawV };
+                  }
                 }
               }
-            }
-          } catch (e) {}
+            } catch (e) {}
+          }
         }
 
         const imgData = workCtx.getImageData(0, 0, tw, th);
@@ -6291,6 +6515,28 @@
       });
     }
 
+    const btnNextCust = document.getElementById('btnNextCustomer');
+    if (btnNextCust) {
+      btnNextCust.addEventListener('click', function () {
+        setActiveCustomerBarcode('', false);
+        customerScanArmed = true;
+        syncCustomerScanBarUI();
+        showBanner('warn', '🎯 BƯỚC 1: Đưa Barcode khách hàng mới vào khung rồi bấm nút tròn CHỤP!');
+      });
+    }
+
+    const btnToggleCustList = document.getElementById('btnToggleCustProdList');
+    if (btnToggleCustList) {
+      btnToggleCustList.addEventListener('click', function () {
+        customerProdListExpanded = !customerProdListExpanded;
+        const content = document.getElementById('custProdListContent');
+        if (content) {
+          content.classList.toggle('is-open', customerProdListExpanded);
+        }
+        btnToggleCustList.textContent = customerProdListExpanded ? 'Thu gọn ▲' : 'Xem chi tiết ▼';
+      });
+    }
+
     const camVideoEl = document.getElementById('cameraVideo');
     if (camVideoEl) {
       camVideoEl.addEventListener('click', function (ev) {
@@ -6565,6 +6811,10 @@
     edit: function (id) { openEditModal(id); },
     del: function (id) { confirmDeleteRecord(id); },
     rescueDates: function (id) { rescueDatesForRecord(id); },
+    filterCustomer: function (custKey) {
+      activeRecordCustomerFilter = custKey;
+      renderScanLists();
+    },
     editCatalog: function (code) {
       const cur = getProductNameOrNull(code) || '';
       const next = prompt('Sửa tên hiển thị cho mã ' + code + ':', cur);

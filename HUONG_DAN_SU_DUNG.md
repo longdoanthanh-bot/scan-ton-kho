@@ -1,6 +1,10 @@
-# 📦 HƯỚNG DẪN SỬ DỤNG APP CHỤP TEM TỒN KHO — BẢN v19 (HỖ TRỢ QUÉT BARCODE KHÁCH HÀNG TÙY CHỌN • CHỤP 1 CHẠM BỎ QUA NÚT OK)
+# 📦 HƯỚNG DẪN SỬ DỤNG APP CHỤP TEM TỒN KHO — BẢN v20 (QUY TRÌNH QUÉT MÃ KHÁCH HÀNG TRƯỚC SẢN PHẨM • TỰ ĐỘNG NHẬN DIỆN MÃ KH • THEO DÕI SẢN PHẨM THEO TỪNG KHÁCH)
 
-Ứng dụng chuyên biệt trên Điện thoại dùng **cảm biến chụp ảnh tĩnh 4:3 độ nét gốc**, có sẵn **trường quét Barcode khách hàng ngay phía trên trước lúc quét sản phẩm (hoàn toàn tùy chọn — có thể bỏ qua không bắt buộc)**, **bấm chụp 1 chạm là nổi hình vừa chụp lên màn hình và TỰ ĐỘNG GHI NHẬN ngay lập tức** (**bỏ qua hoàn toàn màn hình bấm nút `OK / Sử dụng ảnh`**), tự lấy trọn **Barcode khách hàng (nếu có) + Mã sản phẩm + Tên hàng + Số ký + NSX + HSD**, hoạt động **100% cả khi mất mạng** và **tự động đồng bộ 2 chiều với Google Sheet `SCAN TỒN`**.
+Ứng dụng chuyên biệt trên Điện thoại dùng **cảm biến chụp ảnh tĩnh 4:3 độ nét gốc**, thiết kế **quy trình 2 bước chuẩn hóa**:
+1. **👉 BƯỚC 1**: Quét mã Barcode/QR Code khách hàng (hoặc bỏ qua để chụp thẳng sản phẩm).
+2. **👉 BƯỚC 2**: Chụp các sản phẩm thuộc về khách hàng đó — máy **tự động ghi nhận danh sách sản phẩm, số tem, số ký và lô hạn dùng (date) riêng cho từng khách**.
+3. **Cơ chế Tự Động Nhận Diện Kép (Dual-Auto-Detect)**: Nếu người dùng quên bấm nút "Quét mã KH" mà đưa camera vào Barcode/QR Code khách hàng rồi bấm chụp, máy **tự động phân biệt mã khách và kích hoạt khách hàng ngay tức khắc** mà không báo lỗi!
+4. **Bấm chụp 1 chạm là nổi hình vừa chụp lên màn hình và TỰ ĐỘNG GHI NHẬN ngay lập tức** (**bỏ qua hoàn toàn màn hình bấm nút `OK / Sử dụng ảnh`**), tự lấy trọn **Mã khách hàng + Mã sản phẩm + Tên hàng + Số ký + NSX + HSD**, hoạt động **100% cả khi mất mạng** và **tự động đồng bộ 2 chiều với Google Sheet `SCAN TỒN`**.
 
 ---
 
@@ -14,17 +18,24 @@
 
 ---
 
-## 👤 2. TRƯỜNG QUÉT BARCODE KHÁCH HÀNG TRƯỚC LÚC QUÉT SẢN PHẨM (CÓ THỂ BỎ QUA)
+## 👤 2. QUY TRÌNH QUÉT MÃ KHÁCH HÀNG TRƯỚC SẢN PHẨM (2 BƯỚC THÔNG MINH)
 
-Ngay đầu màn hình chụp có thanh **`👤 Barcode khách hàng (Không bắt buộc • Có thể bỏ qua)`**:
+### 🟢 Bước 1: Quét mã khách hàng (Tùy chọn)
+- **Nếu cần phân loại hàng theo khách**:
+  - Bấm nút **`📷 Quét mã KH`** → Đưa mã vạch hoặc mã vuông QR Code trên phiếu xuất/hóa đơn vào khung → Bấm nút tròn **`📸 CHỤP`**.
+  - **Đặc biệt (Dual-Auto-Detect)**: Bạn cũng có thể để nguyên máy ảnh chụp thẳng mã khách hàng mà **không cần bấm nút Quét mã KH trước**, hệ thống sẽ tự động phát hiện và gán mã khách ngay lập tức!
+  - Ứng dụng kêu *Bíp*, đổi thanh trạng thái màu xanh: **`👤 KHÁCH HÀNG: [MÃ KHÁCH HÀNG]`**.
+- **Nếu không cần phân loại theo khách (Bỏ qua)**:
+  - Cứ chụp thẳng tem sản phẩm bình thường! Cột khách hàng sẽ tự động để dấu gạch ngang **`—`** (không chặn, không hỏi phiền hà).
 
-- **Trường hợp 1 — Không cần gán khách hàng (Bỏ qua luôn)**:
-  - Bạn **không cần bấm hay nhập gì vào ô này** — cứ để trống và chụp thẳng các tem sản phẩm như bình thường! Hệ thống tự động để dấu **`—`** ở cột `Barcode khách hàng` (không chặn, không hỏi xác nhận).
-- **Trường hợp 2 — Cần quét Barcode khách hàng trước khi quét sản phẩm**:
-  1. Bấm nút **`📷 Quét mã KH`** (khung ngắm chuyển sang viền vàng nhạt) → đưa mã vạch khách hàng trên phiếu/rổ vào khung → bấm nút tròn **`📸 CHỤP`** 1 chạm (hoặc gõ trực tiếp vào ô mã khách hàng).
-  2. Tấm hình nổi lên báo **`✅ ĐÃ GÁN BARCODE KHÁCH HÀNG`** và **tự động chuyển ngay về chế độ chụp sản phẩm** (không cần bấm `OK`).
-  3. Toàn bộ các tem sản phẩm bạn chụp tiếp theo sẽ **tự động gắn kèm mã khách hàng này**.
-  4. Khi chuyển sang khách hàng khác, bấm **`📷 Đổi mã KH`** để quét mã mới; hoặc bấm **`✕ Bỏ qua`** để xóa mã khách hàng về trống (`—`).
+### 📦 Bước 2: Chụp các sản phẩm của khách hàng này
+- Sau khi có mã khách hàng, bạn chỉ việc đưa camera chụp lần lượt các tem sản phẩm của khách đó.
+- Ngay trên thanh khách hàng có sẵn hộp tổng hợp trực quan:
+  - **`📦 Đã gán cho khách này: X tem • Y.YYY Kg`**.
+  - Bấm nút **`Xem chi tiết ▼`** để thấy danh sách đầy đủ: từng mã sản phẩm, tên hàng, số tem, số ký và các lô hạn dùng (date) của riêng khách đó.
+- Khi làm xong đơn của khách này và chuyển sang khách hàng tiếp theo:
+  - Bấm nút **`🔄 Khách mới`** → Máy sẵn sàng nhận mã khách hàng mới ngay lập tức.
+  - Hoặc bấm **`✕ Bỏ qua`** nếu các bao hàng tiếp theo không gắn với khách nào.
 
 ---
 
@@ -32,11 +43,12 @@ Ngay đầu màn hình chụp có thanh **`👤 Barcode khách hàng (Không b�
 
 1. **Đưa mặt tem vào khung ngắm** (mặc định máy tự bật mức **`1.5x Nét`** giúp cầm điện thoại cách tem `20–25 cm` lấy nét cực căng; có thể chạm nhẹ ngón tay vào mặt tem trên màn hình để khóa nét).
 2. **Bấm nút tròn `📸 CHỤP` đúng 1 lần duy nhất**:
-   - **Tấm hình vừa chụp lập tức nổi lên góc trên màn hình** kèm tiếng *Bíp* — **ĐÃ TỰ ĐỘNG GHI NHẬN NGAY** (gồm **Barcode KH (nếu có) + Ảnh thu nhỏ + Tên hàng + Mã SP + Số ký + NSX + HSD**), **tuyệt đối không bắt bấm nút `OK`**!
+   - **Tấm hình vừa chụp lập tức nổi lên góc trên màn hình** kèm tiếng *Bíp* — **ĐÃ TỰ ĐỘNG GHI NHẬN NGAY** (gồm **Mã khách hàng + Ảnh thu nhỏ + Tên hàng + Mã SP + Số ký + NSX + HSD**), **tuyệt đối không bắt bấm nút `OK`**!
    - Đưa thẳng ống kính sang bao hàng kế tiếp bấm **`📸 CHỤP`** liên hoàn ngay lập tức!
    - Nếu bấm nhầm bao, bấm **`🗑️ Hủy`** ngay trên tấm hình nổi để xóa tức thì; nếu góc ngày bị khuất bóng, bấm **`📷 Bù ngày`** rồi chụp góc chữ `NSX / HSD`.
-3. **Tải loạt ảnh đã chụp sẵn (nếu có)**:
-   - Bấm **`📚 Tải ảnh có sẵn`** ở góc phải dưới khung chụp để chọn nhiều hình đọc tự động 1 lần.
+3. **Bộ lọc xem nhanh theo khách trong "Nhật ký quét"**:
+   - Vào mục **`📋 Nhật ký quét`**, các thẻ lọc nhanh xuất hiện: **`[ Tất cả ]`**, **`[ 👤 KH001 (10) ]`**, **`[ 👤 KH002 (5) ]`**, **`[ 👤 Chưa gán (2) ]`**.
+   - Bấm vào tên khách nào thì màn hình chỉ hiện các sản phẩm của khách đó!
 
 ---
 
@@ -49,4 +61,4 @@ Ngay đầu màn hình chụp có thanh **`👤 Barcode khách hàng (Không b�
   1. **Theo Mã SP × Theo Hạn dùng (`SKU × Date`)**
   2. **Gộp Theo Mã Sản Phẩm (`Theo SKU`)**
   3. **Gộp Theo Hạn Dùng (`Theo Date`)**
-  4. **Gộp Theo Barcode Khách Hàng (`Theo KH`)**
+  4. **Gộp Theo Barcode Khách Hàng (`Theo KH`)**: Kê chi tiết từng khách hàng có những sản phẩm gì, số tem, số ký và kèm theo các lô hạn dùng `[Lô Date: NSX ➜ HSD]`.

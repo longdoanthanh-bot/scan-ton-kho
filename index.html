@@ -10,7 +10,7 @@
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=19">
+  <link rel="stylesheet" href="./styles.css?v=20">
 </head>
 <body>
 
@@ -27,17 +27,33 @@
       <!-- TRƯỜNG QUÉT BARCODE KHÁCH HÀNG TRƯỚC LÚC QUÉT SẢN PHẨM (TÙY CHỌN — CÓ THỂ BỎ QUA KHÔNG BẮT BUỘC) -->
       <div id="customerScanBar" class="customer-scan-bar">
         <div class="customer-bar-head">
-          <span class="customer-bar-title">👤 Barcode khách hàng <span class="customer-opt-tag">(Không bắt buộc • Có thể bỏ qua)</span></span>
+          <div class="customer-bar-left">
+            <span class="customer-step-indicator" id="customerStepIndicator">1️⃣ Bước 1</span>
+            <span class="customer-bar-title" id="customerBarTitle">Quét Mã Khách Hàng <span class="customer-opt-tag">(Trước khi quét SP)</span></span>
+          </div>
           <span id="customerActiveChip" class="customer-active-chip" style="display:none;">Đang gán KH</span>
         </div>
+
         <div class="customer-bar-controls">
           <input type="text" id="customerBarcodeInput" class="customer-barcode-input" autocomplete="off" placeholder="Bỏ trống nếu bỏ qua, hoặc quét/nhập mã KH...">
           <button type="button" id="btnScanCustomerBarcode" class="btn customer-scan-btn" title="Quét 1 chạm Barcode khách hàng bằng Máy ảnh trước khi quét sản phẩm">
             📷 Quét mã KH
           </button>
+          <button type="button" id="btnNextCustomer" class="btn customer-next-btn" style="display:none;" title="Đổi sang quét cho khách hàng tiếp theo">
+            🔄 Đổi khách
+          </button>
           <button type="button" id="btnClearCustomerBarcode" class="btn customer-skip-btn" style="display:none;" title="Bỏ qua / Xóa mã khách hàng">
             ✕ Bỏ qua
           </button>
+        </div>
+
+        <!-- Khối hiển thị chi tiết các sản phẩm đã ghi nhận cho khách hàng này -->
+        <div id="customerProductsSummaryBox" class="customer-products-summary-box" style="display:none;">
+          <div class="cust-prod-head">
+            <span id="custProdHeadText">📦 Sản phẩm của khách này: <strong>0 tem • 0.000 Kg</strong></span>
+            <button type="button" id="btnToggleCustProdList" class="cust-prod-toggle-btn">▼ Xem chi tiết</button>
+          </div>
+          <div id="custProdListContent" class="cust-prod-list-content" style="display:none;"></div>
         </div>
       </div>
 
@@ -79,7 +95,7 @@
           <!-- Khung ngắm gọn chuẩn máy ảnh chụp ảnh tĩnh 4:3 -->
           <div class="barcode-aim-overlay">
             <div class="barcode-aim-box photo-clean-frame">
-              <div id="aimZoneTop" class="aim-zone-top">📷 MÁY ẢNH 1 CHẠM v19 • CHẠM MÀN HÌNH LẤY NÉT</div>
+              <div id="aimZoneTop" class="aim-zone-top">📷 MÁY ẢNH 1 CHẠM v20 • CHẠM MÀN HÌNH LẤY NÉT</div>
               <div id="aimZoneBottom" class="aim-zone-bottom">Bấm nút tròn Chụp → Nổi hình lên là ĐÃ GHI NHẬN (Không cần bấm OK)</div>
             </div>
           </div>
@@ -239,6 +255,7 @@
             <button type="button" id="btnClearSession" class="btn btn-danger" style="padding:7px 10px;font-size:12.5px;">🧹 Xóa làm phiên mới</button>
           </div>
         </div>
+        <div id="customerFilterBar" class="customer-filter-bar" style="display:none;"></div>
         <input type="search" id="searchHistoryInput" class="search-input" placeholder="🔍 Tìm theo Barcode KH, Mã SP, Tên SP, NSX/HSD (12/11/2026) hoặc Mã vạch...">
         <div id="fullScansList" class="scan-list"></div>
       </section>
@@ -308,7 +325,7 @@
         <div class="settings-hero-top">
           <div>
             <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-            <div class="brand-sub">Bản v19 Tinh Gọn • Hỗ trợ Barcode Khách hàng tùy chọn + Máy ảnh 1 chạm • Tồn theo SKU, Date &amp; KH</div>
+            <div class="brand-sub">Bản v20 Tinh Gọn • Quét Mã Khách Hàng Trước Sản Phẩm + Máy ảnh 1 chạm • Tồn theo SKU, Date &amp; KH</div>
           </div>
           <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
             <span id="syncStatusDot" class="sync-dot"></span>
@@ -515,10 +532,10 @@
   </div>
 
   <!-- Bộ giải mã mã vạch 1D + Bộ đọc chữ NSX/HSD trên tem nạp cục bộ 100% (chạy mượt cả khi mất mạng) -->
-  <script src="./vendor/zxing_wasm_reader.js?v=19"></script>
-  <script src="./vendor/ocr/tesseract.min.js?v=19"></script>
-  <script src="./catalog.js?v=19"></script>
-  <script src="./apps_script_embed.js?v=19"></script>
-  <script src="./app.js?v=19"></script>
+  <script src="./vendor/zxing_wasm_reader.js?v=20"></script>
+  <script src="./vendor/ocr/tesseract.min.js?v=20"></script>
+  <script src="./catalog.js?v=20"></script>
+  <script src="./apps_script_embed.js?v=20"></script>
+  <script src="./app.js?v=20"></script>
 </body>
 </html>

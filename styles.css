@@ -1419,10 +1419,45 @@ html, body {
   margin-bottom: 6px;
 }
 
+.customer-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.customer-step-indicator {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+  white-space: nowrap;
+}
+
+.customer-scan-bar.is-armed .customer-step-indicator {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fcd34d;
+}
+
+.customer-scan-bar.has-value .customer-step-indicator {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: #86efac;
+}
+
 .customer-bar-title {
   font-size: 12.5px;
   font-weight: 800;
   color: #0f2942;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .customer-opt-tag {
@@ -1495,6 +1530,23 @@ html, body {
   color: #ffffff;
 }
 
+.customer-next-btn {
+  background: #0284c7;
+  color: #ffffff;
+  border: none;
+  border-radius: 9px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.customer-next-btn:active {
+  background: #0369a1;
+}
+
 .customer-skip-btn {
   background: #fee2e2;
   color: #b91c1c;
@@ -1505,6 +1557,81 @@ html, body {
   font-weight: 800;
   white-space: nowrap;
   cursor: pointer;
+}
+
+.customer-products-summary-box {
+  margin-top: 7px;
+  padding: 6px 9px;
+  background: #ffffff;
+  border: 1px dashed #93c5fd;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.cust-prod-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  color: #0369a1;
+  font-weight: 700;
+}
+
+.cust-prod-toggle-btn {
+  background: transparent;
+  border: none;
+  color: #0284c7;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+
+.cust-prod-list-content {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid #e0f2fe;
+  font-size: 11.5px;
+  color: #334155;
+  line-height: 1.5;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.cust-prod-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+  border-bottom: 1px dotted #f1f5f9;
+}
+
+/* Thanh lọc nhanh theo khách hàng trong Tab Danh sách */
+.customer-filter-bar {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px 2px 8px 2px;
+  margin-bottom: 6px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.cust-filter-pill {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  border: 1.5px solid #cbd5e1;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.cust-filter-pill.active {
+  background: #0f2942;
+  border-color: #0f2942;
+  color: #ffffff;
 }
 
 .camera-viewport.is-customer-mode .photo-clean-frame {
