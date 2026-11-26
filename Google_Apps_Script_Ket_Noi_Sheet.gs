@@ -15,7 +15,7 @@ const SHEET_CHI_TIET = 'Du_Lieu_Scan';
 const SHEET_TONG_HOP = 'Tong_Hop_Moi';
 const SHEET_DANH_MUC = 'Danh_Muc_SP';
 const APP_ONLINE_URL = 'https://longdoanthanh-bot.github.io/scan-ton-kho/';
-const SCRIPT_VERSION = 'v13_isolated_6_fields';
+const SCRIPT_VERSION = 'v14_dup_warning_6_fields';
 
 function getTargetSpreadsheet() {
   try {
@@ -588,13 +588,33 @@ function writeAllScanRecords(ss, records) {
   if (!records || records.length === 0) return;
 
   const seenCodes = {};
+  const dupCodeWeightCounts = {};
+  const dupCustCodeWeightCounts = {};
+  for (let k = 0; k < records.length; k++) {
+    const rk = records[k];
+    const ck = String(rk.productCode || '').trim();
+    const gk = Math.round(Number(rk.grams !== undefined ? rk.grams : Math.round(Number(rk.weightKg || 0) * 1000)));
+    const custk = cleanCustomerField(rk.customerBarcode).toLowerCase();
+    if (ck && gk > 0) {
+      const pairKey = ck + '|' + gk;
+      dupCodeWeightCounts[pairKey] = (dupCodeWeightCounts[pairKey] || 0) + 1;
+      if (custk) {
+        const triKey = custk + '|' + ck + '|' + gk;
+        dupCustCodeWeightCounts[triKey] = (dupCustCodeWeightCounts[triKey] || 0) + 1;
+      }
+    }
+  }
+
   let distinctCount = 0;
   let runningGrams = 0;
   const rows = [];
+  const rowBgs = [];
+  const rowFgs = [];
 
   for (let i = 0; i < records.length; i++) {
     const r = records[i];
-    const custDisp = cleanCustomerField(r.customerBarcode) || '—';
+    const custRaw = cleanCustomerField(r.customerBarcode);
+    const custDisp = custRaw || '—';
     const code = String(r.productCode || '').trim();
     const name = (r.productName && String(r.productName).trim() !== '') ? String(r.productName).trim() : '—';
     const grams = Math.round(Number(r.grams !== undefined ? r.grams : Math.round(Number(r.weightKg || 0) * 1000)));
@@ -607,7 +627,18 @@ function writeAllScanRecords(ss, records) {
       distinctCount += 1;
     }
 
-    const bcAndNote = [String(r.rawBarcode || '').trim(), String(r.note || '').trim()]
+    const pairCount = (code && grams > 0) ? (dupCodeWeightCounts[code + '|' + grams] || 0) : 0;
+    const triCount = (custRaw && code && grams > 0) ? (dupCustCodeWeightCounts[custRaw.toLowerCase() + '|' + code + '|' + grams] || 0) : 0;
+    const isDupRow = pairCount >= 2;
+    let noteClean = String(r.note || '').trim();
+    if (isDupRow && noteClean.indexOf('TRÙNG') === -1) {
+      const warnTxt = (triCount >= 2)
+        ? ('⚠️ CẢNH BÁO TRÙNG KHÁCH + MÃ + SỐ KÝ (x' + pairCount + ')')
+        : ('⚠️ CẢNH BÁO TRÙNG MÃ + SỐ KÝ (x' + pairCount + ')');
+      noteClean = noteClean ? (warnTxt + ' | ' + noteClean) : warnTxt;
+    }
+
+    const bcAndNote = [String(r.rawBarcode || '').trim(), noteClean]
       .filter(function (x) { return x !== ''; })
       .join(' | ');
 
@@ -625,13 +656,21 @@ function writeAllScanRecords(ss, records) {
       bcAndNote,
       String(r.id || ('scan_' + (i + 1)))
     ]);
+
+    const bg = isDupRow ? '#FEE2E2' : '#FFFFFF';
+    const fg = isDupRow ? '#991B1B' : '#0F172A';
+    rowBgs.push([bg, bg, bg, bg, bg, bg, bg, bg, bg, bg, bg, bg]);
+    rowFgs.push([fg, fg, fg, fg, fg, fg, fg, fg, fg, fg, fg, fg]);
   }
 
   sh.getRange(2, 1, rows.length, 3).setNumberFormat('@');
   sh.getRange(2, 6, rows.length, 2).setNumberFormat('@');
   sh.getRange(2, 11, rows.length, 2).setNumberFormat('@');
 
-  sh.getRange(2, 1, rows.length, 12).setValues(rows);
+  const dataRange = sh.getRange(2, 1, rows.length, 12);
+  dataRange.setValues(rows);
+  dataRange.setBackgrounds(rowBgs);
+  dataRange.setFontColors(rowFgs);
 
   sh.getRange(2, 5, rows.length, 1).setNumberFormat('#,##0.000');
   sh.getRange(2, 8, rows.length, 2).setNumberFormat('#,##0');

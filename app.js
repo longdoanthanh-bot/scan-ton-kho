@@ -75,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v29';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v30';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -3136,26 +3136,86 @@
     updateSyncBadge();
   }
 
+  function getDuplicateCodeWeightInfo(rec) {
+    if (!rec || !rec.productCode || !rec.grams) return { count: 0, sameCustCount: 0, isDup: false, isSameCustDup: false };
+    const codeKey = String(rec.productCode).trim();
+    const gramsVal = Math.round(Number(rec.grams) || 0);
+    const custKey = cleanCustomerBarcode(rec.customerBarcode).toLowerCase();
+    let count = 0;
+    let sameCustCount = 0;
+    for (let i = 0; i < records.length; i++) {
+      const it = records[i];
+      if (String(it.productCode || '').trim() === codeKey && Math.round(Number(it.grams) || 0) === gramsVal) {
+        count += 1;
+        if (custKey && cleanCustomerBarcode(it.customerBarcode).toLowerCase() === custKey) {
+          sameCustCount += 1;
+        }
+      }
+    }
+    return {
+      count: count,
+      sameCustCount: sameCustCount,
+      isDup: count >= 2,
+      isSameCustDup: sameCustCount >= 2
+    };
+  }
+
   function renderLatestCard(flash) {
     const card = document.getElementById('latestScanCard');
     const emptyState = document.getElementById('latestEmptyState');
     const contentState = document.getElementById('latestContentState');
-
     const prodTick = document.getElementById('prodDoneTick');
+    const dupStrip = document.getElementById('dupAlertStrip');
+    const dupStripText = document.getElementById('dupAlertStripText');
+    const btnUndoDup = document.getElementById('btnUndoDupScan');
+
     if (records.length === 0) {
       emptyState.style.display = 'none';
       contentState.style.display = 'none';
-      card.classList.remove('flash-ok', 'flash-warn', 'field-ok');
-      if (prodTick) prodTick.style.display = 'none';
+      card.classList.remove('flash-ok', 'flash-warn', 'field-ok', 'field-dup-warn');
+      if (prodTick) {
+        prodTick.style.display = 'none';
+        prodTick.classList.remove('is-dup');
+      }
+      if (dupStrip) dupStrip.style.display = 'none';
       return;
     }
 
     emptyState.style.display = 'none';
     contentState.style.display = 'block';
-    card.classList.add('field-ok');
-    if (prodTick) prodTick.style.display = 'inline-flex';
 
     const latest = records[records.length - 1];
+    const dupInfo = getDuplicateCodeWeightInfo(latest);
+    if (dupInfo.isDup) {
+      card.classList.remove('field-ok');
+      card.classList.add('field-dup-warn');
+      if (prodTick) {
+        prodTick.style.display = 'inline-flex';
+        prodTick.classList.add('is-dup');
+        prodTick.textContent = dupInfo.isSameCustDup
+          ? ('⚠️ TRÙNG KH + MÃ + KÝ (x' + dupInfo.count + ')')
+          : ('⚠️ TRÙNG MÃ + KÝ (x' + dupInfo.count + ')');
+      }
+      if (dupStrip && dupStripText) {
+        dupStrip.style.display = 'flex';
+        dupStripText.textContent = (dupInfo.isSameCustDup ? '⚠️ TRÙNG KHÁCH + MÃ + SỐ KÝ: ' : '⚠️ TRÙNG MÃ + SỐ KÝ: ') +
+          (latest.productCode || '—') + ' (' + formatKg(latest.grams) + ' Kg) đã quét ' + dupInfo.count + ' lần!';
+      }
+      if (btnUndoDup) {
+        btnUndoDup.onclick = function () {
+          deleteRecordById(latest.id);
+        };
+      }
+    } else {
+      card.classList.remove('field-dup-warn');
+      card.classList.add('field-ok');
+      if (prodTick) {
+        prodTick.style.display = 'inline-flex';
+        prodTick.classList.remove('is-dup');
+        prodTick.textContent = '✅ Đã ghi nhận';
+      }
+      if (dupStrip) dupStrip.style.display = 'none';
+    }
     document.getElementById('latestTime').textContent = latest.scannedAt;
 
     const latestCustEl = document.getElementById('latestCustomer');
@@ -3306,7 +3366,11 @@
     const custBadge = custVal
       ? ('<span class="scan-cust-badge">👤 KH: ' + escapeHtml(custVal) + '</span>')
       : ('<span class="scan-cust-badge is-empty">👤 KH: —</span>');
-    const lotLine = '<div>' + custBadge + '</div>';
+    const dupInfoRow = getDuplicateCodeWeightInfo(r);
+    const dupRowBadge = dupInfoRow.isDup
+      ? ('<span class="scan-dup-badge">⚠️ TRÙNG MÃ+KÝ (x' + dupInfoRow.count + ')</span>')
+      : '';
+    const lotLine = '<div>' + custBadge + dupRowBadge + '</div>';
     return (
       '<div class="scan-row-card' + (r.edited ? ' edited' : '') + '">' +
         '<div class="scan-row-left">' +
@@ -5034,20 +5098,34 @@
             const committed = commitBatchPhotoScan(parsed, { nsx: '', hsd: '' }, '');
             if (committed.ok && committed.record) {
               const r = committed.record;
+              const dupCheck = getDuplicateCodeWeightInfo(r);
+              if (dupCheck.isDup && (!r.note || r.note.indexOf('TRÙNG') === -1)) {
+                r.note = dupCheck.isSameCustDup
+                  ? ('⚠️ TRÙNG KHÁCH + MÃ + SỐ KÝ (x' + dupCheck.count + ')')
+                  : ('⚠️ TRÙNG MÃ + SỐ KÝ (x' + dupCheck.count + ')');
+                persistRecords();
+                enqueueOp({ type: 'update', record: toSyncRecord(r) });
+              }
               // Ghi nhận xong -> giữ tích xanh 650ms cho dễ nhìn rồi tự động trả Ô 1 (Tên khách) về khoảng trắng!
               if (activeCustomerBarcode) {
                 setTimeout(function () { setActiveCustomerBarcode('', true); }, 650);
               }
               renderAll(true);
               flushSyncQueue(false);
-              playBeep('ok');
-              vibrateDevice([40]);
+              if (dupCheck.isDup) {
+                playBeep('warn');
+                setTimeout(function () { playBeep('warn'); }, 220);
+                vibrateDevice([120, 60, 120]);
+              } else {
+                playBeep('ok');
+                vibrateDevice([40]);
+              }
               const thumb = createThumbnailDataUrl(autoScanCanvas, 160);
               const custLabel = r.customerBarcode ? ('Khách: ' + r.customerBarcode) : 'Khách: —';
               updateSnapPopCardUI({
-                stateClass: 'state-ok',
+                stateClass: dupCheck.isDup ? 'state-err' : 'state-ok',
                 thumbSrc: thumb,
-                badge: '✅ ĐÃ GHI NHẬN',
+                badge: dupCheck.isDup ? ('⚠️ CẢNH BÁO TRÙNG MÃ + SỐ KÝ (x' + dupCheck.count + ')') : '✅ ĐÃ GHI NHẬN',
                 title: (r.productName || ('Mã ' + r.productCode)) + ' (' + r.productCode + ') — ' + formatKg(r.grams) + ' Kg',
                 dates: custLabel,
                 recordId: r.id,
@@ -6566,14 +6644,29 @@
         const committed = commitBatchPhotoScan(parsed, { nsx: '', hsd: '' }, '');
         if (committed.ok && committed.record) {
           const r = committed.record;
+          const dupCheck = getDuplicateCodeWeightInfo(r);
+          if (dupCheck.isDup && (!r.note || r.note.indexOf('TRÙNG') === -1)) {
+            r.note = dupCheck.isSameCustDup
+              ? ('⚠️ TRÙNG KHÁCH + MÃ + SỐ KÝ (x' + dupCheck.count + ')')
+              : ('⚠️ TRÙNG MÃ + SỐ KÝ (x' + dupCheck.count + ')');
+            persistRecords();
+            enqueueOp({ type: 'update', record: toSyncRecord(r) });
+          }
           renderAll(true);
           flushSyncQueue(false);
-          playBeep('ok');
-          vibrateDevice([40]);
+          if (dupCheck.isDup) {
+            playBeep('warn');
+            setTimeout(function () { playBeep('warn'); }, 220);
+            vibrateDevice([120, 60, 120]);
+            showBanner('error', '⚠️ CẢNH BÁO TRÙNG MÃ + SỐ KÝ (x' + dupCheck.count + '): ' + (r.productName || ('Mã ' + r.productCode)) + ' — ' + formatKg(r.grams) + ' Kg!');
+          } else {
+            playBeep('ok');
+            vibrateDevice([40]);
+            showBanner('ok', '✅ PDA: ' + (r.customerBarcode ? ('[' + r.customerBarcode + '] ') : '') + (r.productName || ('Mã ' + r.productCode)) + ' — ' + formatKg(r.grams) + ' Kg');
+          }
           if (activeCustomerBarcode) {
             setTimeout(function () { setActiveCustomerBarcode('', true); }, 650);
           }
-          showBanner('ok', '✅ PDA: ' + (r.customerBarcode ? ('[' + r.customerBarcode + '] ') : '') + (r.productName || ('Mã ' + r.productCode)) + ' — ' + formatKg(r.grams) + ' Kg');
         }
       } else {
         // Nếu tia PDA bắn mã không phải tem cân 13 số -> tự nhận là Tên / Mã khách hàng -> điền Ô 1 (xanh ✅) & nhảy sang Ô 2!

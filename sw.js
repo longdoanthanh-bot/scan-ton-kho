@@ -1,4 +1,4 @@
-const CACHE_NAME = 'scan-ton-kho-v29';
+const CACHE_NAME = 'scan-ton-kho-v30';
 const CORE_ASSETS = [
   './',
   './index.html',
