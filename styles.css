@@ -1830,3 +1830,137 @@ html, body {
 .aim-zone-bottom {
   display: none !important;
 }
+
+/* ==================== GIAO DIỆN MÀN HÌNH SCAN TRỐNG THOÁNG v26 ==================== */
+.scan-fields-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.scan-field-card {
+  background: #ffffff;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 8px 10px !important;
+  margin-bottom: 0 !important;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+}
+
+.scan-field-label {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: #475569;
+  margin-bottom: 5px;
+  text-transform: uppercase;
+  letter-spacing: 0.2px;
+}
+
+.scan-field-opt {
+  font-weight: 500;
+  text-transform: none;
+  color: #94a3b8;
+}
+
+.product-field-card {
+  border-color: #93c5fd !important;
+  background: #f8fbff !important;
+}
+
+.product-field-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.product-field-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.product-empty-hint {
+  font-size: 13px;
+  color: #64748b;
+  font-weight: 600;
+}
+
+.product-field-name {
+  font-size: 15px;
+  font-weight: 900;
+  color: #0f2942;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.product-field-vals {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.pf-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+
+.pf-code {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+.pf-weight {
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 13.5px;
+}
+
+.product-field-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.product-snap-btn {
+  background: #0284c7;
+  color: #ffffff;
+  padding: 9px 14px;
+  font-size: 13.5px;
+  font-weight: 900;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.28);
+}
+
+.product-snap-btn:active {
+  background: #0369a1;
+  transform: scale(0.97);
+}
+
+.product-mini-tools {
+  display: flex;
+  gap: 4px;
+}
+
+.mini-tool-btn {
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  border-radius: 7px;
+  padding: 3px 7px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.mini-tool-btn.del {
+  border-color: #fecaca;
+  background: #fef2f2;
+}

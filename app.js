@@ -75,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v25';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v26';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -884,7 +884,7 @@
         chip.style.display = 'inline-block';
         chip.textContent = activeCustomerBarcode + ' (' + custMet.count + ')';
       }
-      if (btnScan) btnScan.textContent = '📷 Quét';
+      if (btnScan) btnScan.textContent = '📷 Chụp';
       if (btnNext) btnNext.style.display = 'inline-flex';
       if (btnSkip) {
         btnSkip.style.display = 'inline-flex';
@@ -917,7 +917,7 @@
       if (stepInd) stepInd.textContent = 'KH';
       if (barTitle) barTitle.textContent = 'Tên khách';
       if (chip) chip.style.display = 'none';
-      if (btnScan) btnScan.textContent = '📷 Quét';
+      if (btnScan) btnScan.textContent = '📷 Chụp';
       if (btnNext) btnNext.style.display = 'none';
       if (btnSkip) btnSkip.style.display = 'none';
       if (prodBox) prodBox.style.display = 'none';
@@ -6580,7 +6580,7 @@
         }
         const kpiSec = document.getElementById('kpiSummarySection');
         if (kpiSec) {
-          kpiSec.style.display = (target === 'tabSettings' || target === 'tabCatalog') ? 'none' : 'grid';
+          kpiSec.style.display = (target === 'tabHistory' || target === 'tabSummary') ? 'flex' : 'none';
         }
         if (target !== 'tabScan') {
           stopCamera1DScanner();
@@ -6589,6 +6589,18 @@
         }
       });
     });
+
+    const btnQuickScanProd = document.getElementById('btnQuickScanProduct');
+    if (btnQuickScanProd) {
+      btnQuickScanProd.addEventListener('click', function () {
+        if (customerScanArmed) {
+          customerScanArmed = false;
+          syncCustomerScanBarUI();
+        }
+        const shutter = document.getElementById('btnShutterScan');
+        if (shutter) shutter.click();
+      });
+    }
 
     document.getElementById('searchHistoryInput').addEventListener('input', renderScanLists);
     document.getElementById('searchCatalogInput').addEventListener('input', renderCatalogTab);
