@@ -828,7 +828,7 @@
       bar.classList.toggle('has-value', Boolean(!customerScanArmed && activeCustomerBarcode));
     }
 
-    // Hiển thị dòng gợi ý 3 cách hoặc danh sách khách đã có để chọn nhanh 1 chạm
+    // Hiển thị chọn nhanh khách đã quét (ẩn hoàn toàn khi chưa có khách để giao diện gọn)
     if (quickPills) {
       const custSet = {};
       for (let i = 0; i < records.length; i++) {
@@ -837,82 +837,60 @@
       }
       const custArr = Object.keys(custSet);
       if (custArr.length > 0) {
-        let html = '<span class="pill-label">🏷️ Khách đã có:</span>';
+        let html = '';
         custArr.forEach(function (name) {
           const isSel = (name === cleanCustomerBarcode(activeCustomerBarcode));
           html += '<button type="button" class="cust-pill-chip' + (isSel ? ' is-active' : '') + '" data-cust="' + escapeHtml(name) + '">' +
-            escapeHtml(name) + ' (' + custSet[name] + ' tem)' +
+            escapeHtml(name) + ' (' + custSet[name] + ')' +
           '</button>';
         });
         quickPills.innerHTML = html;
+        quickPills.style.display = 'flex';
       } else {
-        quickPills.innerHTML = '<span style="color:#64748b;font-size:11px;">💡 <strong>3 Cách ghi nhận:</strong> 📷 Quét tem in sẵn • 💾 Gõ tay rồi bấm Lưu • ⏭️ Bỏ qua (hiển thị "—")</span>';
+        quickPills.innerHTML = '';
+        quickPills.style.display = 'none';
       }
     }
 
     if (customerScanArmed) {
-      if (stepInd) {
-        stepInd.textContent = '🎯 BƯỚC 1';
-      }
-      if (barTitle) {
-        barTitle.innerHTML = 'Khách Hàng <span class="customer-opt-tag">(Đang ngắm mã vạch in sẵn)</span>';
-      }
+      if (stepInd) stepInd.textContent = 'KH';
+      if (barTitle) barTitle.textContent = 'Đang quét mã khách';
       if (chip) {
         chip.style.display = 'inline-block';
-        chip.textContent = '🎯 Đang ngắm mã KH';
+        chip.textContent = 'Quét mã KH';
       }
-      if (btnScan) {
-        btnScan.textContent = '🎯 Đang quét mã';
-      }
-      if (btnNext) {
-        btnNext.style.display = 'none';
-      }
+      if (btnScan) btnScan.textContent = '🎯 Đang quét';
+      if (btnNext) btnNext.style.display = 'none';
       if (btnSkip) {
         btnSkip.style.display = 'inline-flex';
-        btnSkip.textContent = '⏭️ Bỏ qua';
+        btnSkip.textContent = 'Bỏ qua';
       }
-      if (prodBox) {
-        prodBox.style.display = 'none';
-      }
-      if (viewportBox) {
-        viewportBox.classList.add('is-customer-mode');
-      }
-      if (aimTop) {
-        aimTop.textContent = '👤 ĐANG QUÉT MÃ KHÁCH HÀNG (BẤM NÚT TRÒN ĐỂ GÁN)';
-      }
-      if (aimBottom) {
-        aimBottom.textContent = 'Ngắm mã vạch in sẵn hoặc QR khách hàng → Bấm nút tròn CHỤP (hoặc bấm "⏭️ Bỏ qua")';
-      }
+      if (prodBox) prodBox.style.display = 'none';
+      if (viewportBox) viewportBox.classList.add('is-customer-mode');
+      if (aimTop) aimTop.textContent = 'Quét mã khách';
+      if (aimBottom) aimBottom.textContent = '';
     } else if (activeCustomerBarcode) {
       const custMet = getActiveCustomerMetrics();
-      if (stepInd) {
-        stepInd.textContent = '2️⃣ BƯỚC 2';
-      }
-      if (barTitle) {
-        barTitle.innerHTML = 'Khách: <strong>' + escapeHtml(activeCustomerBarcode) + '</strong> <span class="customer-opt-tag">(Chụp các sản phẩm cho khách này)</span>';
-      }
+      if (stepInd) stepInd.textContent = 'KH';
+      if (barTitle) barTitle.innerHTML = '<strong>' + escapeHtml(activeCustomerBarcode) + '</strong>';
       if (chip) {
         chip.style.display = 'inline-block';
-        chip.textContent = '👤 ' + activeCustomerBarcode + ' (' + custMet.count + ' tem)';
+        chip.textContent = activeCustomerBarcode + ' (' + custMet.count + ')';
       }
-      if (btnScan) {
-        btnScan.textContent = '📷 Đổi mã KH';
-      }
-      if (btnNext) {
-        btnNext.style.display = 'inline-flex';
-      }
+      if (btnScan) btnScan.textContent = '📷 Quét';
+      if (btnNext) btnNext.style.display = 'inline-flex';
       if (btnSkip) {
         btnSkip.style.display = 'inline-flex';
-        btnSkip.textContent = '✕ Bỏ qua';
+        btnSkip.textContent = 'Bỏ qua';
       }
       if (prodBox) {
-        prodBox.style.display = 'block';
+        prodBox.style.display = custMet.count > 0 ? 'block' : 'none';
         if (prodHeadTxt) {
-          prodHeadTxt.innerHTML = '📦 Đã gán cho khách này: <strong>' + custMet.count + ' tem • ' + formatKg(custMet.grams) + ' Kg</strong>';
+          prodHeadTxt.innerHTML = 'Khách này: <strong>' + custMet.count + ' tem • ' + formatKg(custMet.grams) + ' Kg</strong>';
         }
         if (prodListContent) {
           if (custMet.items.length === 0) {
-            prodListContent.innerHTML = '<div style="color:#64748b;font-style:italic;">Chưa có sản phẩm nào cho khách này — Hãy bấm nút tròn CHỤP các tem hàng!</div>';
+            prodListContent.innerHTML = '';
           } else {
             prodListContent.innerHTML = custMet.items.map(function (it) {
               const lotsArr = Object.keys(it.lots);
@@ -925,46 +903,20 @@
           }
         }
       }
-      if (viewportBox) {
-        viewportBox.classList.remove('is-customer-mode');
-      }
-      if (aimTop) {
-        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v21 • ĐANG GÁN KH: ' + activeCustomerBarcode;
-      }
-      if (aimBottom) {
-        aimBottom.textContent = 'Bấm nút tròn Chụp tem sản phẩm → Nổi hình là TỰ ĐỘNG GHI NHẬN cho khách ' + activeCustomerBarcode + '!';
-      }
+      if (viewportBox) viewportBox.classList.remove('is-customer-mode');
+      if (aimTop) aimTop.textContent = 'KH: ' + activeCustomerBarcode;
+      if (aimBottom) aimBottom.textContent = '';
     } else {
-      if (stepInd) {
-        stepInd.textContent = '👤 Bước 1';
-      }
-      if (barTitle) {
-        barTitle.innerHTML = 'Khách Hàng <span class="customer-opt-tag">(3 Cách: Quét mã • Nhập tay • Bỏ qua)</span>';
-      }
-      if (chip) {
-        chip.style.display = 'none';
-      }
-      if (btnScan) {
-        btnScan.textContent = '📷 Quét mã KH';
-      }
-      if (btnNext) {
-        btnNext.style.display = 'none';
-      }
-      if (btnSkip) {
-        btnSkip.style.display = 'none';
-      }
-      if (prodBox) {
-        prodBox.style.display = 'none';
-      }
-      if (viewportBox) {
-        viewportBox.classList.remove('is-customer-mode');
-      }
-      if (aimTop) {
-        aimTop.textContent = '📷 MÁY ẢNH 1 CHẠM v21 • CHẠM MÀN HÌNH LẤY NÉT';
-      }
-      if (aimBottom) {
-        aimBottom.textContent = 'Bấm nút tròn Chụp → Nổi hình lên là ĐÃ GHI NHẬN (Không cần bấm OK)';
-      }
+      if (stepInd) stepInd.textContent = 'KH';
+      if (barTitle) barTitle.textContent = 'Tên khách';
+      if (chip) chip.style.display = 'none';
+      if (btnScan) btnScan.textContent = '📷 Quét';
+      if (btnNext) btnNext.style.display = 'none';
+      if (btnSkip) btnSkip.style.display = 'none';
+      if (prodBox) prodBox.style.display = 'none';
+      if (viewportBox) viewportBox.classList.remove('is-customer-mode');
+      if (aimTop) aimTop.textContent = 'Quét tem hàng';
+      if (aimBottom) aimBottom.textContent = '';
     }
     setShutterUIState('ready');
   }

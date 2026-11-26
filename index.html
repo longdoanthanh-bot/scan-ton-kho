@@ -6,11 +6,11 @@
   <meta name="theme-color" content="#0f2942">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Quét Tồn Kho Tem Mã Vạch — Máy Ảnh 1 Chạm (Hỗ Trợ Barcode KH • Mã SP • Số Ký • NSX • HSD)</title>
+  <title>Quét Tồn Kho — Tên Khách • Mã Hàng • Tên Hàng • Khối Lượng • NSX • HSD</title>
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=21">
+  <link rel="stylesheet" href="./styles.css?v=22">
 </head>
 <body>
 
@@ -24,40 +24,40 @@
     <!-- ==================== DUY NHẤT CHẾ ĐỘ MÁY ẢNH CHỤP 1 CHẠM: BẤM CHỤP -> NỔI HÌNH LÊN LÀ ĐÃ GHI NHẬN (KHÔNG CẦN NÚT OK) ==================== -->
     <div id="scanTopSection">
 
-      <!-- TRƯỜNG KHÁCH HÀNG: 3 DẠNG GHI NHẬN (QUÉT MÃ VẠCH IN SẴN • TỰ NHẬP LIỆU • BỎ QUA) -->
-      <div id="customerScanBar" class="customer-scan-bar">
-        <div class="customer-bar-head">
+      <!-- TRƯỜNG TÊN KHÁCH (SIÊU GỌN 1 DÒNG: QUÉT MÃ • TỰ NHẬP • BỎ QUA) -->
+      <div id="customerScanBar" class="customer-scan-bar compact-customer-bar">
+        <div class="customer-bar-head" style="display:none;">
           <div class="customer-bar-left">
-            <span class="customer-step-indicator" id="customerStepIndicator">👤 Bước 1</span>
-            <span class="customer-bar-title" id="customerBarTitle">Khách Hàng <span class="customer-opt-tag">(3 Cách: Quét mã • Nhập tay • Bỏ qua)</span></span>
+            <span class="customer-step-indicator" id="customerStepIndicator">KH</span>
+            <span class="customer-bar-title" id="customerBarTitle">Tên khách</span>
           </div>
-          <span id="customerActiveChip" class="customer-active-chip" style="display:none;">Đang gán KH</span>
+          <span id="customerActiveChip" class="customer-active-chip" style="display:none;">Đang gán</span>
         </div>
 
         <div class="customer-bar-controls">
-          <input type="text" id="customerBarcodeInput" class="customer-barcode-input" autocomplete="off" placeholder="Gõ tên/mã KH hoặc bấm Quét / Bỏ qua...">
-          <button type="button" id="btnScanCustomerBarcode" class="btn customer-scan-btn" title="Cách 1: Quét mã vạch in sẵn của khách bằng máy ảnh">
-            📷 Quét mã KH
+          <input type="text" id="customerBarcodeInput" class="customer-barcode-input" autocomplete="off" placeholder="Tên khách (quét mã, nhập tay hoặc bỏ qua)">
+          <button type="button" id="btnScanCustomerBarcode" class="btn customer-scan-btn" title="Quét mã vạch khách hàng">
+            📷 Quét
           </button>
-          <button type="button" id="btnSaveCustomerInput" class="btn customer-save-btn" title="Cách 2: Ghi nhận tên/mã khách vừa gõ tay">
-            💾 Ghi nhận
+          <button type="button" id="btnSaveCustomerInput" class="btn customer-save-btn" title="Lưu tên khách vừa nhập">
+            ✓
           </button>
-          <button type="button" id="btnClearCustomerBarcode" class="btn customer-skip-btn" title="Cách 3: Bỏ qua (không bắt buộc, để trống '—')">
-            ⏭️ Bỏ qua
+          <button type="button" id="btnClearCustomerBarcode" class="btn customer-skip-btn" title="Bỏ qua tên khách">
+            Bỏ qua
           </button>
-          <button type="button" id="btnNextCustomer" class="btn customer-next-btn" style="display:none;" title="Đổi sang khách hàng tiếp theo">
-            🔄 Đổi khách
+          <button type="button" id="btnNextCustomer" class="btn customer-next-btn" style="display:none;" title="Đổi sang khách khác">
+            Đổi
           </button>
         </div>
 
-        <!-- Dòng gợi ý 3 cách & chọn nhanh khách đã có -->
-        <div id="customerQuickPills" class="customer-quick-pills"></div>
+        <!-- Chọn nhanh khách đã quét (ẩn khi chưa có) -->
+        <div id="customerQuickPills" class="customer-quick-pills" style="display:none;"></div>
 
-        <!-- Khối hiển thị chi tiết các sản phẩm đã ghi nhận cho khách hàng này -->
+        <!-- Tóm tắt gọn số tem của khách đang chọn -->
         <div id="customerProductsSummaryBox" class="customer-products-summary-box" style="display:none;">
           <div class="cust-prod-head">
-            <span id="custProdHeadText">📦 Sản phẩm của khách này: <strong>0 tem • 0.000 Kg</strong></span>
-            <button type="button" id="btnToggleCustProdList" class="cust-prod-toggle-btn">▼ Xem chi tiết</button>
+            <span id="custProdHeadText">Khách này: <strong>0 tem • 0.000 Kg</strong></span>
+            <button type="button" id="btnToggleCustProdList" class="cust-prod-toggle-btn">Chi tiết</button>
           </div>
           <div id="custProdListContent" class="cust-prod-list-content" style="display:none;"></div>
         </div>
@@ -98,20 +98,18 @@
             </div>
           </div>
 
-          <!-- Khung ngắm gọn chuẩn máy ảnh chụp ảnh tĩnh 4:3 -->
+          <!-- Khung ngắm gọn sạch -->
           <div class="barcode-aim-overlay">
             <div class="barcode-aim-box photo-clean-frame">
-              <div id="aimZoneTop" class="aim-zone-top">📷 MÁY ẢNH 1 CHẠM v20 • CHẠM MÀN HÌNH LẤY NÉT</div>
-              <div id="aimZoneBottom" class="aim-zone-bottom">Bấm nút tròn Chụp → Nổi hình lên là ĐÃ GHI NHẬN (Không cần bấm OK)</div>
+              <div id="aimZoneTop" class="aim-zone-top">Quét tem hàng</div>
+              <div id="aimZoneBottom" class="aim-zone-bottom" style="display:none;"></div>
             </div>
           </div>
 
-          <!-- Cụm Nút Bấm Chụp 1 Chạm (Không qua màn hình OK xác nhận) -->
+          <!-- Nút Chụp 1 Chạm -->
           <div class="camera-shutter-dock">
-            <div id="cameraStatusBadge" class="camera-badge">
-              👆 Chạm vào tem để lấy nét → Bấm nút tròn là nổi hình &amp; ghi nhận ngay!
-            </div>
-            <button type="button" id="btnShutterScan" class="shutter-btn" aria-label="Bấm chụp 1 chạm tự động ghi nhận">
+            <div id="cameraStatusBadge" class="camera-badge" style="display:none;"></div>
+            <button type="button" id="btnShutterScan" class="shutter-btn" aria-label="Bấm chụp 1 chạm">
               <span class="shutter-inner" id="shutterInnerLabel">
                 <span class="shutter-icon" id="shutterIcon">📸</span>
                 <span class="shutter-text" id="shutterText">CHỤP</span>
@@ -122,13 +120,13 @@
 
         <div class="camera-controls">
           <div id="zoomButtonsGroup" style="display:flex;gap:4px;">
-            <button type="button" class="btn btn-outline zoom-btn" data-zoom="1" style="padding:8px 9px;font-size:12px;">1x</button>
-            <button type="button" class="btn btn-primary zoom-btn" data-zoom="1.5" style="padding:8px 9px;font-size:12px;" title="Lấy nét cực rõ từ khoảng cách 20-25cm">1.5x Nét</button>
-            <button type="button" class="btn btn-outline zoom-btn" data-zoom="2" style="padding:8px 9px;font-size:12px;">2x</button>
+            <button type="button" class="btn btn-outline zoom-btn" data-zoom="1" style="padding:6px 8px;font-size:12px;">1x</button>
+            <button type="button" class="btn btn-primary zoom-btn" data-zoom="1.5" style="padding:6px 8px;font-size:12px;">1.5x</button>
+            <button type="button" class="btn btn-outline zoom-btn" data-zoom="2" style="padding:6px 8px;font-size:12px;">2x</button>
           </div>
-          <button type="button" id="btnSwitchLens" class="btn btn-outline" style="display:none;padding:8px 9px;font-size:12px;" title="Đổi sang ống kính góc rộng / lấy nét sát gần của điện thoại">🔄 Ống kính</button>
-          <button type="button" id="btnToggleTorch" class="btn btn-outline" style="padding:8px 9px;font-size:12px;">🔦 Đèn</button>
-          <button type="button" id="btnPickBatchPhotos" class="btn btn-success" style="flex:1;min-width:128px;padding:8px 10px;font-size:12px;font-weight:800;">📚 Tải ảnh có sẵn</button>
+          <button type="button" id="btnSwitchLens" class="btn btn-outline" style="display:none;padding:6px 8px;font-size:12px;">🔄</button>
+          <button type="button" id="btnToggleTorch" class="btn btn-outline" style="padding:6px 8px;font-size:12px;">🔦</button>
+          <button type="button" id="btnPickBatchPhotos" class="btn btn-success" style="flex:1;min-width:96px;padding:6px 10px;font-size:12px;font-weight:800;">📚 Tải ảnh</button>
         </div>
 
         <!-- Hộp tiến trình khi người dùng tải lên 1 loạt ảnh có sẵn từ Thư viện -->
@@ -160,88 +158,85 @@
       <button type="button" class="icon-btn" onclick="document.getElementById('alertBanner').className='alert-banner'">Đóng</button>
     </div>
 
-    <section class="kpi-grid" id="kpiSummarySection" aria-label="Tổng hợp đã quét">
+    <!-- Thanh tổng hợp siêu gọn 1 dòng -->
+    <section class="kpi-grid kpi-slim-bar" id="kpiSummarySection" aria-label="Tổng hợp đã quét">
       <div class="kpi-card kpi-scans">
-        <div class="kpi-label">Tổng số tem đã scan</div>
-        <div id="kpiTotalScans" class="kpi-value">0</div>
-        <div class="kpi-unit">tem</div>
+        <span class="kpi-label">Tem:</span>
+        <strong id="kpiTotalScans" class="kpi-value">0</strong>
       </div>
       <div class="kpi-card kpi-products">
-        <div class="kpi-label">Tổng số sản phẩm đã scan</div>
-        <div id="kpiTotalProducts" class="kpi-value">0</div>
-        <div class="kpi-unit">sản phẩm</div>
+        <span class="kpi-label">Mặt hàng:</span>
+        <strong id="kpiTotalProducts" class="kpi-value">0</strong>
       </div>
       <div class="kpi-card kpi-weight">
-        <div class="kpi-label">Tổng số ký đã scan</div>
-        <div id="kpiTotalKg" class="kpi-value">0.000</div>
-        <div class="kpi-unit">Kg</div>
+        <span class="kpi-label">Tổng KL:</span>
+        <strong id="kpiTotalKg" class="kpi-value">0.000</strong>
+        <span class="kpi-unit">Kg</span>
       </div>
     </section>
 
-    <!-- ==================== TAB 1: CHI TIẾT TEM VỪA QUÉT ==================== -->
+    <!-- ==================== TAB 1: KẾT QUẢ 6 TRƯỜNG VỪA QUÉT ==================== -->
     <div id="tabScan" class="tab-view active">
 
-      <!-- THẺ TEM VỪA SCAN (CÓ ĐỦ MÃ SP, SỐ KÝ, NSX & HSD) -->
+      <!-- THẺ KẾT QUẢ VỪA QUÉT: ĐÚNG 6 TRƯỜNG (TÊN KHÁCH • MÃ HÀNG • TÊN HÀNG • KHỐI LƯỢNG • NSX • HSD) -->
       <section id="latestScanCard" class="latest-card">
-        <div id="latestEmptyState" style="text-align:center;padding:12px 6px;color:#475569;">
-          <div style="font-size:24px;margin-bottom:3px;">🏷️</div>
-          <div style="font-weight:800;color:#0f2942;">Sẵn sàng quét tem tồn kho (Tự lấy Mã SP • Số ký • NSX • HSD)</div>
-          <div style="font-size:12px;margin-top:2px;">
-            Tự động lưu về bảng tính Google Sheet <strong>SCAN TỒN</strong> (kể cả quét khi mất mạng)
-          </div>
+        <div id="latestEmptyState" style="text-align:center;padding:8px 6px;color:#64748b;font-size:13px;">
+          Chưa có tem nào — Chụp tem để ghi nhận 6 trường dữ liệu
         </div>
 
         <div id="latestContentState" style="display:none;">
           <div class="latest-header">
-            <span class="latest-badge">✅ TEM VỪA SCAN</span>
-            <span class="latest-time">🕒 <strong id="latestTime">—</strong></span>
+            <span class="latest-badge">✅ VỪA QUÉT</span>
+            <span class="latest-time"><strong id="latestTime">—</strong></span>
           </div>
 
           <div class="latest-customer-row">
-            <span>👤 Barcode khách hàng:</span>
+            <span>Tên khách</span>
             <strong id="latestCustomer">—</strong>
           </div>
 
-          <div style="font-size:11.5px;font-weight:700;color:#475569;">Tên sản phẩm:</div>
-          <div id="latestName" class="latest-product-name">—</div>
+          <div class="latest-name-row">
+            <span class="detail-label">Tên hàng</span>
+            <div id="latestName" class="latest-product-name">—</div>
+          </div>
 
           <div class="latest-details-grid">
             <div class="detail-box">
-              <div class="detail-label">Mã sản phẩm</div>
+              <div class="detail-label">Mã hàng</div>
               <div id="latestCode" class="detail-val">—</div>
             </div>
             <div class="detail-box">
-              <div class="detail-label">Số ký tem vừa scan</div>
+              <div class="detail-label">Khối lượng</div>
               <div id="latestWeight" class="detail-val weight-highlight">0.000 Kg</div>
             </div>
             <div class="detail-box detail-box-date">
-              <div class="detail-label">Ngày sản xuất (NSX)</div>
+              <div class="detail-label">NSX</div>
               <div id="latestNsx" class="detail-val detail-val-date">—</div>
             </div>
             <div class="detail-box detail-box-date">
-              <div class="detail-label">Hạn sử dụng (HSD)</div>
+              <div class="detail-label">HSD</div>
               <div id="latestHsd" class="detail-val detail-val-date hsd-accent">—</div>
             </div>
           </div>
 
           <div class="latest-meta-row">
-            <span id="latestBarcode">Mã vạch: —</span>
+            <span id="latestBarcode" style="font-size:11px;color:#64748b;">—</span>
             <div class="latest-actions">
-              <button type="button" id="btnScanDatesLatest" class="btn btn-outline" style="padding:7px 9px;font-size:12px;" title="Chụp đọc bổ sung NSX/HSD trên tem">📷 Đọc NSX/HSD</button>
-              <button type="button" id="btnEditLatest" class="btn btn-warning" style="padding:7px 10px;font-size:12px;">✏️ Sửa</button>
-              <button type="button" id="btnDeleteLatest" class="btn btn-danger" style="padding:7px 10px;font-size:12px;">🗑️ Xóa</button>
+              <button type="button" id="btnScanDatesLatest" class="btn btn-outline" style="padding:5px 8px;font-size:11.5px;">📷 Ngày</button>
+              <button type="button" id="btnEditLatest" class="btn btn-warning" style="padding:5px 8px;font-size:11.5px;">✏️ Sửa</button>
+              <button type="button" id="btnDeleteLatest" class="btn btn-danger" style="padding:5px 8px;font-size:11.5px;">🗑️ Xóa</button>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- 5 Dòng Vừa Quét Gần Nhất -->
+      <!-- Danh sách vừa quét -->
       <section class="section-card">
         <div class="section-header">
-          <h2 class="section-title">🕒 5 tem vừa quét gần nhất</h2>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <button type="button" id="btnQuickPullSheet" class="icon-btn" title="Cập nhật ngay theo dữ liệu thực trên Google Sheet">🔄 Khớp GG Sheet</button>
-            <button type="button" id="btnQuickClearSession" class="icon-btn del" title="Xóa trắng để quét lại từ 0">🧹 Xóa làm lại từ 0</button>
+          <h2 class="section-title">Vừa quét</h2>
+          <div style="display:flex;gap:6px;">
+            <button type="button" id="btnQuickPullSheet" class="icon-btn" title="Tải lại từ Google Sheet">🔄 Khớp Sheet</button>
+            <button type="button" id="btnQuickClearSession" class="icon-btn del" title="Xóa trắng phiên">🧹 Xóa</button>
           </div>
         </div>
         <div id="recentScansPreview" class="scan-list"></div>
@@ -331,7 +326,7 @@
         <div class="settings-hero-top">
           <div>
             <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-            <div class="brand-sub">Bản v21 Tinh Gọn • Khách Hàng (3 Dạng) + Máy ảnh 1 chạm • Tồn theo SKU, Date &amp; KH</div>
+            <div class="brand-sub">Bản v22 Tinh Gọn • 6 Trường: Tên khách • Mã hàng • Tên hàng • Khối lượng • NSX • HSD</div>
           </div>
           <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
             <span id="syncStatusDot" class="sync-dot"></span>
@@ -411,22 +406,22 @@
       <input type="hidden" id="editRecordId">
 
       <div class="form-group">
-        <label class="form-label" for="editCustomerInput">Barcode khách hàng (Không bắt buộc — để trống nếu bỏ qua)</label>
-        <input type="text" id="editCustomerInput" class="form-control" placeholder="Để trống (—) hoặc nhập mã khách hàng">
+        <label class="form-label" for="editCustomerInput">Tên khách (để trống nếu bỏ qua)</label>
+        <input type="text" id="editCustomerInput" class="form-control" placeholder="Nhập tên hoặc mã khách">
       </div>
 
       <div class="form-group">
-        <label class="form-label" for="editCodeInput">Mã sản phẩm (5 số — ví dụ: 10040)</label>
+        <label class="form-label" for="editCodeInput">Mã hàng</label>
         <input type="text" id="editCodeInput" class="form-control" inputmode="numeric" placeholder="10040">
       </div>
 
       <div class="form-group">
-        <label class="form-label" for="editNameInput">Tên sản phẩm</label>
+        <label class="form-label" for="editNameInput">Tên hàng</label>
         <input type="text" id="editNameInput" class="form-control" placeholder="Chân giò heo trước">
       </div>
 
       <div class="form-group">
-        <label class="form-label" for="editWeightInput">Số ký (Kg — ví dụ: 5.198)</label>
+        <label class="form-label" for="editWeightInput">Khối lượng (Kg)</label>
         <input type="text" id="editWeightInput" class="form-control" inputmode="decimal" placeholder="5.198">
       </div>
 
@@ -541,7 +536,7 @@
   <script src="./vendor/zxing_wasm_reader.js?v=20"></script>
   <script src="./vendor/ocr/tesseract.min.js?v=20"></script>
   <script src="./catalog.js?v=20"></script>
-  <script src="./apps_script_embed.js?v=20"></script>
-  <script src="./app.js?v=21"></script>
+  <script src="./apps_script_embed.js?v=22"></script>
+  <script src="./app.js?v=22"></script>
 </body>
 </html>

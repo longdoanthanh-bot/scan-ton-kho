@@ -15,7 +15,7 @@ const SHEET_CHI_TIET = 'Chi_Tiet_Scan';
 const SHEET_TONG_HOP = 'Tong_Hop_Ton';
 const SHEET_DANH_MUC = 'Danh_Muc_SP';
 const APP_ONLINE_URL = 'https://longdoanthanh-bot.github.io/scan-ton-kho/';
-const SCRIPT_VERSION = 'v11_customer_barcode';
+const SCRIPT_VERSION = 'v12_6_fields_clean';
 
 function getTargetSpreadsheet() {
   try {
@@ -52,7 +52,12 @@ function onEdit(e) {
 
 function isCustomerHeader(title) {
   const t = String(title || '').trim().toLowerCase();
-  return t === 'khách hàng' || t === 'barcode khách hàng' || t.indexOf('khách hàng') >= 0;
+  return t === 'tên khách' || t === 'khách hàng' || t === 'barcode khách hàng' || t.indexOf('khách') >= 0;
+}
+
+function isCodeFirstHeader(col3Title) {
+  const t = String(col3Title || '').trim().toLowerCase();
+  return t === 'mã hàng' || t === 'mã sản phẩm' || t.indexOf('mã ') === 0;
 }
 
 function sheetNeedsSelfHeal(ss, parsedRecords) {
@@ -62,7 +67,8 @@ function sheetNeedsSelfHeal(ss, parsedRecords) {
     if (!shDetail || !shSum) return false;
 
     const col2Title = String(shDetail.getRange(1, 2).getDisplayValue() || '').trim();
-    if (!isCustomerHeader(col2Title)) {
+    const col3Title = String(shDetail.getRange(1, 3).getDisplayValue() || '').trim();
+    if (!isCustomerHeader(col2Title) || !isCodeFirstHeader(col3Title)) {
       return true;
     }
 
@@ -246,15 +252,15 @@ function rebuildTotalsAndSummary() {
 function formatDetailHeader(shDetail) {
   const headers = [[
     'Ngày giờ scan',
-    'Khách hàng', // Hỗ trợ 3 dạng: Scan mã vạch in sẵn • Tự nhập liệu • Bỏ qua (Barcode khách hàng)
-    'Tên sản phẩm',
-    'Mã sản phẩm',
-    'Số ký tem vừa scan',
+    'Tên khách', // Hỗ trợ 3 dạng: Quét mã vạch • Tự nhập • Bỏ qua (Barcode khách hàng)
+    'Mã hàng',
+    'Tên hàng',
+    'Khối lượng (Kg)',
     'NSX',
     'HSD',
-    'Tổng số tem đã scan',
-    'Tổng số sản phẩm đã scan',
-    'Tổng số ký đã scan',
+    'Tổng số tem',
+    'Tổng số mặt hàng',
+    'Tổng khối lượng (Kg)',
     'Mã vạch gốc / Ghi chú',
     'Mã dòng đồng bộ'
   ]];
@@ -266,7 +272,7 @@ function formatDetailHeader(shDetail) {
     .setVerticalAlignment('middle');
   shDetail.setFrozenRows(1);
   shDetail.setRowHeight(1, 36);
-  const widths = [155, 165, 230, 110, 145, 115, 115, 145, 170, 145, 200, 150];
+  const widths = [155, 165, 110, 230, 135, 115, 115, 120, 145, 155, 200, 150];
   for (let c = 0; c < widths.length; c++) {
     shDetail.setColumnWidth(c + 1, widths[c]);
   }
@@ -307,11 +313,17 @@ function ensureSheetsExist(ss) {
     formatDetailHeader(shDetail);
   } else {
     const col2Title = String(shDetail.getRange(1, 2).getDisplayValue() || '').trim();
+    const col3Title = String(shDetail.getRange(1, 3).getDisplayValue() || '').trim();
     const col5Title = String(shDetail.getRange(1, 5).getDisplayValue() || '').trim();
     if (!isCustomerHeader(col2Title)) {
       const migratedRecords = (col5Title === 'NSX')
         ? readLegacy11ColRecords(shDetail)
         : readLegacy9ColRecords(shDetail);
+      formatDetailHeader(shDetail);
+      writeAllScanRecords(ss, migratedRecords);
+      rebuildTotalsAndSummaryInternal(ss);
+    } else if (!isCodeFirstHeader(col3Title)) {
+      const migratedRecords = readAllScanRecords(ss);
       formatDetailHeader(shDetail);
       writeAllScanRecords(ss, migratedRecords);
       rebuildTotalsAndSummaryInternal(ss);
@@ -535,16 +547,19 @@ function readAllScanRecords(ss) {
   if (lastRow <= 1) return [];
 
   const col2Title = String(sh.getRange(1, 2).getDisplayValue() || '').trim();
+  const col3Title = String(sh.getRange(1, 3).getDisplayValue() || '').trim();
   const col5Title = String(sh.getRange(1, 5).getDisplayValue() || '').trim();
   if (!isCustomerHeader(col2Title)) {
     return (col5Title === 'NSX') ? readLegacy11ColRecords(sh) : readLegacy9ColRecords(sh);
   }
 
+  const codeFirst = isCodeFirstHeader(col3Title);
   const values = sh.getRange(2, 1, lastRow - 1, 12).getDisplayValues();
   const out = [];
   for (let i = 0; i < values.length; i++) {
     const row = values[i];
-    const code = String(row[3] || '').trim();
+    const code = String((codeFirst ? row[2] : row[3]) || '').trim();
+    const name = String((codeFirst ? row[3] : row[2]) || '—').trim() || '—';
     const rawKg = String(row[4] || '').replace(/,/g, '').trim();
     const grams = Math.round(parseFloat(rawKg || '0') * 1000);
     // Nếu người dùng xóa dòng hoặc bôi đen bấm Delete xóa Mã SP / Số ký trên Sheet -> ghi nhận dòng đó đã bị xóa!
@@ -556,7 +571,7 @@ function readAllScanRecords(ss) {
       id: String(row[11] || '').trim() || ('sheet_row_' + (i + 2) + '_' + code + '_' + grams),
       scannedAt: String(row[0] || '').trim(),
       customerBarcode: cleanCustomerField(row[1]),
-      productName: String(row[2] || '—').trim() || '—',
+      productName: name,
       productCode: code,
       grams: grams,
       weightKg: grams / 1000,
@@ -605,8 +620,8 @@ function writeAllScanRecords(ss, records) {
     rows.push([
       String(r.scannedAt || ''),
       custDisp,
-      name,
       code,
+      name,
       grams / 1000,
       nsxDisp,
       hsdDisp,
@@ -618,8 +633,7 @@ function writeAllScanRecords(ss, records) {
     ]);
   }
 
-  sh.getRange(2, 1, rows.length, 2).setNumberFormat('@');
-  sh.getRange(2, 4, rows.length, 1).setNumberFormat('@');
+  sh.getRange(2, 1, rows.length, 3).setNumberFormat('@');
   sh.getRange(2, 6, rows.length, 2).setNumberFormat('@');
   sh.getRange(2, 11, rows.length, 2).setNumberFormat('@');
 
@@ -628,8 +642,7 @@ function writeAllScanRecords(ss, records) {
   sh.getRange(2, 5, rows.length, 1).setNumberFormat('#,##0.000');
   sh.getRange(2, 8, rows.length, 2).setNumberFormat('#,##0');
   sh.getRange(2, 10, rows.length, 1).setNumberFormat('#,##0.000');
-  sh.getRange(2, 2, rows.length, 1).setHorizontalAlignment('center');
-  sh.getRange(2, 4, rows.length, 1).setHorizontalAlignment('center');
+  sh.getRange(2, 2, rows.length, 2).setHorizontalAlignment('center');
   sh.getRange(2, 6, rows.length, 4).setHorizontalAlignment('center');
 }
 
