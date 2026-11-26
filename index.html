@@ -10,7 +10,7 @@
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=26">
+  <link rel="stylesheet" href="./styles.css?v=27">
 </head>
 <body>
 
@@ -21,65 +21,56 @@
 
   <main class="app-container">
 
-    <!-- ==================== MÀN HÌNH SCAN SIÊU TRỐNG v26: 2 TRƯỜNG BẤM CHỤP + CAMERA ==================== -->
+    <!-- ==================== MÀN HÌNH SCAN v27: ĐÚNG 2 Ô TRỐNG + NÚT MÁY ẢNH BÊN CẠNH ==================== -->
     <div id="scanTopSection">
 
-      <!-- DANH SÁCH 2 TRƯỜNG CẦN SCAN (TRỐNG THOÁNG, GHI NHẬN TỨC THÌ) -->
-      <div class="scan-fields-stack">
+      <div class="two-box-form">
 
-        <!-- TRƯỜNG 1: TÊN KHÁCH (Bấm Chụp -> Lấy thông tin | Hoặc gõ tay / bỏ qua) -->
-        <div id="customerScanBar" class="customer-scan-bar scan-field-card">
+        <!-- Ô 1: TÊN KHÁCH (Bấm biểu tượng máy ảnh -> Quét xong tự ghi vào ô này & nhảy sang Ô 2) -->
+        <div id="customerScanBar" class="customer-scan-bar form-field-box">
           <div class="customer-bar-head" style="display:none;">
-            <div class="customer-bar-left">
-              <span class="customer-step-indicator" id="customerStepIndicator">KH</span>
-              <span class="customer-bar-title" id="customerBarTitle">Tên khách</span>
-            </div>
-            <span id="customerActiveChip" class="customer-active-chip" style="display:none;">Đang gán</span>
+            <span id="customerStepIndicator">1</span>
+            <span id="customerBarTitle">Tên khách</span>
+            <span id="customerActiveChip" style="display:none;"></span>
           </div>
 
-          <div class="scan-field-label">1. Tên khách <span class="scan-field-opt">(bỏ trống nếu không cần)</span></div>
-          <div class="customer-bar-controls">
-            <input type="text" id="customerBarcodeInput" class="customer-barcode-input" autocomplete="off" placeholder="Bấm Chụp hoặc gõ tên khách...">
-            <button type="button" id="btnScanCustomerBarcode" class="btn customer-scan-btn" title="Chụp mã vạch tên khách">
-              📷 Chụp
-            </button>
-            <button type="button" id="btnSaveCustomerInput" class="btn customer-save-btn" title="Lưu tên khách vừa gõ">
-              ✓
-            </button>
-            <button type="button" id="btnClearCustomerBarcode" class="btn customer-skip-btn" title="Xóa / Bỏ qua tên khách">
-              ✕
-            </button>
-            <button type="button" id="btnNextCustomer" class="btn customer-next-btn" style="display:none;" title="Đổi khách">
-              Đổi
-            </button>
+          <label class="two-box-label" for="customerBarcodeInput">1. Tên khách <span class="two-box-opt">(không bắt buộc)</span></label>
+          <div class="two-box-row">
+            <input type="text" id="customerBarcodeInput" class="two-box-input" autocomplete="off" placeholder="Trống — bấm 📷 để quét hoặc gõ tay">
+            <button type="button" id="btnClearCustomerBarcode" class="two-box-clear-btn" style="display:none;" title="Xóa tên khách">✕</button>
+            <button type="button" id="btnScanCustomerBarcode" class="two-box-cam-btn" title="Bấm để quét mã tên khách">📷</button>
+            <button type="button" id="btnSaveCustomerInput" style="display:none;"></button>
+            <button type="button" id="btnNextCustomer" style="display:none;"></button>
           </div>
 
-          <!-- Ẩn bớt các khối thống kê phụ khỏi màn hình Scan cho trống -->
-          <div id="customerQuickPills" class="customer-quick-pills" style="display:none !important;"></div>
-          <div id="customerProductsSummaryBox" class="customer-products-summary-box" style="display:none !important;">
-            <div class="cust-prod-head">
-              <span id="custProdHeadText"></span>
-              <button type="button" id="btnToggleCustProdList" class="cust-prod-toggle-btn"></button>
-            </div>
-            <div id="custProdListContent" class="cust-prod-list-content" style="display:none;"></div>
+          <div id="customerQuickPills" style="display:none !important;"></div>
+          <div id="customerProductsSummaryBox" style="display:none !important;">
+            <span id="custProdHeadText"></span>
+            <button type="button" id="btnToggleCustProdList"></button>
+            <div id="custProdListContent"></div>
           </div>
         </div>
 
-        <!-- TRƯỜNG 2: TÊN SẢN PHẨM & SỐ KÝ (Bấm Chụp -> Lấy thông tin & Ghi nhận ngay) -->
-        <section id="latestScanCard" class="latest-card scan-field-card product-field-card">
-          <div class="product-field-top">
-            <div class="product-field-info">
-              <div class="scan-field-label">2. Tên sản phẩm &amp; Số ký</div>
-              <div id="latestEmptyState" class="product-empty-hint">
-                Bấm Chụp để lấy Mã, Tên sản phẩm &amp; Số ký
+        <!-- Ô 2: SẢN PHẨM (Tự nhảy vào đây sau Bước 1 — Bấm 📷 quét/chụp lấy Mã SP, Tên SP, Số ký) -->
+        <section id="latestScanCard" class="latest-card form-field-box product-step-box">
+          <div class="two-box-label">2. Mã SP • Tên SP • Số ký</div>
+          <div class="two-box-row">
+            <div class="two-box-product-display" id="productFieldDisplay">
+              <div id="latestEmptyState" class="two-box-placeholder">
+                Trống — bấm 📷 để quét Mã SP, Tên SP, Số ký
               </div>
               <div id="latestContentState" style="display:none;">
-                <div id="latestName" class="product-field-name">—</div>
-                <div class="product-field-vals">
-                  <span class="pf-pill pf-code">Mã: <strong id="latestCode">—</strong></span>
-                  <span class="pf-pill pf-weight"><strong id="latestWeight">0.000 Kg</strong></span>
+                <div class="two-box-prod-line">
+                  <strong id="latestCode" class="tb-code">—</strong>
+                  <span id="latestName" class="tb-name">—</span>
                 </div>
-                <!-- Các phần tử giữ tương thích ẩn gọn -->
+                <div class="two-box-prod-sub">
+                  <strong id="latestWeight" class="tb-weight">0.000 Kg</strong>
+                  <div class="tb-mini-actions">
+                    <button type="button" id="btnEditLatest" class="tb-mini-btn" title="Sửa">✏️</button>
+                    <button type="button" id="btnDeleteLatest" class="tb-mini-btn del" title="Xóa">🗑️</button>
+                  </div>
+                </div>
                 <span id="latestTime" style="display:none;">—</span>
                 <strong id="latestCustomer" style="display:none;">—</strong>
                 <span id="latestNsx" style="display:none;">—</span>
@@ -88,21 +79,18 @@
                 <button type="button" id="btnScanDatesLatest" style="display:none;"></button>
               </div>
             </div>
-            <div class="product-field-actions">
-              <button type="button" id="btnQuickScanProduct" class="btn product-snap-btn" title="Chụp tem sản phẩm lấy Tên & Số ký ngay">
-                📷 Chụp
-              </button>
-              <div class="product-mini-tools">
-                <button type="button" id="btnEditLatest" class="mini-tool-btn" title="Sửa dòng vừa quét">✏️</button>
-                <button type="button" id="btnDeleteLatest" class="mini-tool-btn del" title="Xóa dòng vừa quét">🗑️</button>
-              </div>
-            </div>
+            <button type="button" id="btnQuickScanProduct" class="two-box-cam-btn prod-cam" title="Bấm để quét/chụp Mã SP, Tên SP, Số ký">📷</button>
           </div>
         </section>
 
       </div>
 
-      <div id="cameraBoxCard" class="camera-card">
+      <!-- KHUNG CAMERA (ẨN MẶC ĐỊNH — CHỈ MỞ KHI BẤM BIỂU TƯỢNG 📷 Ở Ô 1 HOẶC Ô 2) -->
+      <div id="cameraBoxCard" class="camera-card" style="display:none;">
+        <div class="camera-drawer-head">
+          <span id="cameraDrawerTitle">📷 Quét sản phẩm (Mã SP • Tên SP • Số ký)</span>
+          <button type="button" id="btnCloseCameraDrawer" class="camera-close-btn" title="Đóng máy ảnh">✕ Đóng</button>
+        </div>
 
         <div id="httpsUpgradePrompt" style="display:none;background:#064e3b;border:2px solid #34d399;border-radius:11px;padding:12px;margin-bottom:10px;text-align:center;">
           <div style="font-weight:900;font-size:14.5px;color:#ecfdf5;margin-bottom:6px;">
@@ -304,7 +292,7 @@
         <div class="settings-hero-top">
           <div>
             <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-            <div class="brand-sub">Bản v26 Trống Thoáng • Bấm Chụp 2 Trường (Tên khách • Tên SP &amp; Số ký)</div>
+            <div class="brand-sub">Bản v27 Form 2 Ô • Bấm 📷 Quét Tên Khách ➜ Tự Nhảy Quét Sản Phẩm</div>
           </div>
           <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
             <span id="syncStatusDot" class="sync-dot"></span>
@@ -513,7 +501,7 @@
   <!-- Bộ giải mã mã vạch 1D siêu tốc nạp cục bộ (đã gỡ bỏ hoàn toàn OCR NSX/HSD cho nhẹ và nhanh tức thì) -->
   <script src="./vendor/zxing_wasm_reader.js?v=20"></script>
   <script src="./catalog.js?v=20"></script>
-  <script src="./apps_script_embed.js?v=26"></script>
-  <script src="./app.js?v=26"></script>
+  <script src="./apps_script_embed.js?v=27"></script>
+  <script src="./app.js?v=27"></script>
 </body>
 </html>
