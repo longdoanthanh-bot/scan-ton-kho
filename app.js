@@ -75,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v23';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v24';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
