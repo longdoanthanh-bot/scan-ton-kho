@@ -6,11 +6,11 @@
   <meta name="theme-color" content="#0f2942">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <title>Quét Tồn Kho — Tên Khách • Mã Hàng • Tên Hàng • Khối Lượng • NSX • HSD</title>
+  <title>Quét Tồn Kho Siêu Tốc — Tên Khách • Mã Hàng • Tên Hàng • Số Ký</title>
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=24">
+  <link rel="stylesheet" href="./styles.css?v=25">
 </head>
 <body>
 
@@ -178,10 +178,10 @@
     <!-- ==================== TAB 1: KẾT QUẢ 6 TRƯỜNG VỪA QUÉT ==================== -->
     <div id="tabScan" class="tab-view active">
 
-      <!-- THẺ KẾT QUẢ VỪA QUÉT: ĐÚNG 6 TRƯỜNG (TÊN KHÁCH • MÃ HÀNG • TÊN HÀNG • KHỐI LƯỢNG • NSX • HSD) -->
+      <!-- THẺ KẾT QUẢ VỪA QUÉT: CHỈ 4 TRƯỜNG SIÊU GỌN (TÊN KHÁCH • MÃ HÀNG • TÊN HÀNG • SỐ KÝ) -->
       <section id="latestScanCard" class="latest-card">
         <div id="latestEmptyState" style="text-align:center;padding:8px 6px;color:#64748b;font-size:13px;">
-          Chưa có tem nào — Chụp tem để ghi nhận 6 trường dữ liệu
+          Chưa có tem nào — Chụp mã vạch để ghi nhận ngay
         </div>
 
         <div id="latestContentState" style="display:none;">
@@ -206,14 +206,14 @@
               <div id="latestCode" class="detail-val">—</div>
             </div>
             <div class="detail-box">
-              <div class="detail-label">Khối lượng</div>
+              <div class="detail-label">Số ký</div>
               <div id="latestWeight" class="detail-val weight-highlight">0.000 Kg</div>
             </div>
-            <div class="detail-box detail-box-date">
+            <div class="detail-box detail-box-date" style="display:none;">
               <div class="detail-label">NSX</div>
               <div id="latestNsx" class="detail-val detail-val-date">—</div>
             </div>
-            <div class="detail-box detail-box-date">
+            <div class="detail-box detail-box-date" style="display:none;">
               <div class="detail-label">HSD</div>
               <div id="latestHsd" class="detail-val detail-val-date hsd-accent">—</div>
             </div>
@@ -222,7 +222,7 @@
           <div class="latest-meta-row">
             <span id="latestBarcode" style="font-size:11px;color:#64748b;">—</span>
             <div class="latest-actions">
-              <button type="button" id="btnScanDatesLatest" class="btn btn-outline" style="padding:5px 8px;font-size:11.5px;">📷 Ngày</button>
+              <button type="button" id="btnScanDatesLatest" class="btn btn-outline" style="display:none;">📷 Ngày</button>
               <button type="button" id="btnEditLatest" class="btn btn-warning" style="padding:5px 8px;font-size:11.5px;">✏️ Sửa</button>
               <button type="button" id="btnDeleteLatest" class="btn btn-danger" style="padding:5px 8px;font-size:11.5px;">🗑️ Xóa</button>
             </div>
@@ -326,7 +326,7 @@
         <div class="settings-hero-top">
           <div>
             <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-            <div class="brand-sub">Bản v24 Tinh Gọn • 6 Trường: Tên khách • Mã hàng • Tên hàng • Khối lượng • NSX • HSD</div>
+            <div class="brand-sub">Bản v25 Siêu Tốc • 4 Trường: Tên khách • Mã hàng • Tên hàng • Số ký</div>
           </div>
           <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
             <span id="syncStatusDot" class="sync-dot"></span>
@@ -425,7 +425,7 @@
         <input type="text" id="editWeightInput" class="form-control" inputmode="decimal" placeholder="5.198">
       </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+      <div style="display:none;">
         <div>
           <label class="form-label" for="editNsxInput">Ngày sản xuất (NSX)</label>
           <input type="text" id="editNsxInput" class="form-control" placeholder="VD: 12/11/2026">
@@ -436,7 +436,7 @@
         </div>
       </div>
 
-      <div style="margin-bottom:11px;">
+      <div style="display:none;">
         <button type="button" id="btnModalReadDates" class="btn btn-outline" style="width:100%;padding:8px 10px;font-size:12.5px;">
           📷 Chụp / Chọn ảnh tem để tự động đọc NSX & HSD
         </button>
@@ -532,11 +532,10 @@
     </div>
   </div>
 
-  <!-- Bộ giải mã mã vạch 1D + Bộ đọc chữ NSX/HSD trên tem nạp cục bộ 100% (chạy mượt cả khi mất mạng) -->
+  <!-- Bộ giải mã mã vạch 1D siêu tốc nạp cục bộ (đã gỡ bỏ hoàn toàn OCR NSX/HSD cho nhẹ và nhanh tức thì) -->
   <script src="./vendor/zxing_wasm_reader.js?v=20"></script>
-  <script src="./vendor/ocr/tesseract.min.js?v=20"></script>
   <script src="./catalog.js?v=20"></script>
-  <script src="./apps_script_embed.js?v=24"></script>
-  <script src="./app.js?v=24"></script>
+  <script src="./apps_script_embed.js?v=25"></script>
+  <script src="./app.js?v=25"></script>
 </body>
 </html>

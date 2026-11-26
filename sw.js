@@ -1,4 +1,4 @@
-const CACHE_NAME = 'scan-ton-kho-v24';
+const CACHE_NAME = 'scan-ton-kho-v25';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -9,9 +9,7 @@ const CORE_ASSETS = [
   './manifest.json',
   './icon-192.svg',
   './vendor/zxing_wasm_reader.js',
-  './vendor/zxing_reader.wasm',
-  './vendor/ocr/tesseract.min.js',
-  './vendor/ocr/worker.min.js'
+  './vendor/zxing_reader.wasm'
 ];
 
 self.addEventListener('install', function (event) {

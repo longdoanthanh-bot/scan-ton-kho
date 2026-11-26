@@ -75,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v24';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v25';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -2333,6 +2333,10 @@
   }
 
   async function extractNsxHsdWithTimeout(fullCanvas, barcodePos, timeoutMs, allowTiltedFallback, rescueAimCropCanvas, shouldAbortFn) {
+    // Bản v25 Siêu Tốc: Đã bỏ hoàn toàn đọc NSX/HSD để quét mã vạch tức thì (<50ms)!
+    return { nsx: '', hsd: '' };
+  }
+  async function _legacyExtractNsxHsdWithTimeout(fullCanvas, barcodePos, timeoutMs, allowTiltedFallback, rescueAimCropCanvas, shouldAbortFn) {
     if (!fullCanvas || !window.Tesseract) return { nsx: '', hsd: '' };
 
     // Chờ nạp bộ đọc chữ lần đầu riêng biệt (tối đa 10 giây nếu sóng 4G yếu lần đầu mở), không để ăn lẹm vào thời gian đọc ảnh!
@@ -2794,10 +2798,9 @@
 
   function commitParsedScan(parsed, datesObj, asyncDateContext) {
     const now = new Date();
-    const nsxClean = (datesObj && datesObj.nsx) ? normalizeDateVN(datesObj.nsx) : '';
-    const hsdClean = (datesObj && datesObj.hsd) ? normalizeDateVN(datesObj.hsd) : '';
-    const canReadAsync = Boolean(window.Tesseract && window.Tesseract.createWorker);
-    const willReadDatesAsync = Boolean(canReadAsync && asyncDateContext && asyncDateContext.frameCanvas && (!nsxClean || !hsdClean));
+    const nsxClean = '';
+    const hsdClean = '';
+    const willReadDatesAsync = false;
 
     const record = {
       id: 'scan_' + now.getTime() + '_' + Math.random().toString(36).slice(2, 7),
@@ -3315,9 +3318,7 @@
     const custBadge = custVal
       ? ('<span class="scan-cust-badge">👤 KH: ' + escapeHtml(custVal) + '</span>')
       : ('<span class="scan-cust-badge is-empty">👤 KH: —</span>');
-    const lotLine = (
-      '<div>' + custBadge + '<span class="scan-lot-badge">📅 NSX: ' + escapeHtml(nsxDisp) + ' • HSD: ' + escapeHtml(hsdDisp) + '</span></div>'
-    );
+    const lotLine = '<div>' + custBadge + '</div>';
     return (
       '<div class="scan-row-card' + (r.edited ? ' edited' : '') + '">' +
         '<div class="scan-row-left">' +
@@ -4349,21 +4350,10 @@
             return;
           }
 
-          let posUse = hit.position || null;
-          if (!posUse) {
-            const det = await detectBarcodeCodeAndPosOnCanvas(workCanvas);
-            if (det && det.pos) posUse = det.pos;
-          }
+          // Chế độ Siêu Tốc v25: Bỏ hoàn toàn OCR đọc NSX/HSD — ghi nhận ngay Mã hàng, Tên hàng, Số ký, Tên khách trong <50ms!
+          const dates = { nsx: '', hsd: '' };
 
-          const dates = await extractNsxHsdWithTimeout(
-            workCanvas,
-            posUse,
-            5600,
-            true,
-            posUse ? null : cropCenterAimFromCanvas(workCanvas)
-          );
-
-          // Nếu người dùng tự bật hỏi trùng trong Cài Đặt (mặc định v18 là TẮT để bỏ qua mọi nút xác nhận)
+          // Nếu người dùng tự bật hỏi trùng trong Cài Đặt (mặc định TẮT để bỏ qua mọi nút xác nhận)
           if (
             settings.duplicateAskSec > 0 &&
             parsed.rawBarcode === lastScannedCode &&
@@ -4383,28 +4373,27 @@
           const committed = commitBatchPhotoScan(parsed, dates, '');
           if (committed.ok && committed.record) {
             const r = committed.record;
-            const hasBoth = Boolean(r.nsx && r.hsd);
             renderAll(true);
             flushSyncQueue(false);
             playBeep('ok');
             if (pendingSnapJobsCount <= 1) {
               vibrateDevice([35]);
             }
-            const custPrefix = r.customerBarcode ? ('👤 KH: ' + r.customerBarcode + ' • ') : '';
+            const custLabel = r.customerBarcode ? ('👤 Khách: ' + r.customerBarcode) : '👤 Khách: —';
             updateSnapPopCardUI({
-              stateClass: hasBoth ? 'state-ok' : 'state-warn',
+              stateClass: 'state-ok',
               thumbSrc: finalThumb,
-              badge: hasBoth ? '✅ ĐÃ GHI NHẬN TỰ ĐỘNG!' : '⚠️ ĐÃ GHI NHẬN MÃ & KÝ (BẤM BÙ NGÀY NẾU CẦN)',
+              badge: '✅ ĐÃ GHI NHẬN',
               title: (r.productName || ('Mã ' + r.productCode)) + ' (' + r.productCode + ') — ' + formatKg(r.grams) + ' Kg',
-              dates: custPrefix + 'NSX: ' + formatLotDateDisplay(r.nsx) + ' • HSD: ' + formatLotDateDisplay(r.hsd),
+              dates: custLabel,
               recordId: r.id,
-              showRescue: !hasBoth
+              showRescue: false
             });
             showBanner(
-              hasBoth ? 'ok' : 'warn',
-              '✅ Đã ghi nhận: ' + (r.customerBarcode ? ('[KH: ' + r.customerBarcode + '] ') : '') +
+              'ok',
+              '✅ ' + (r.customerBarcode ? ('[' + r.customerBarcode + '] ') : '') +
               (r.productName || ('Mã ' + r.productCode)) + ' (' + r.productCode + ') — ' +
-              formatKg(r.grams) + ' Kg | NSX: ' + formatLotDateDisplay(r.nsx) + ' • HSD: ' + formatLotDateDisplay(r.hsd)
+              formatKg(r.grams) + ' Kg'
             );
           } else {
             playBeep('error');
@@ -4418,37 +4407,6 @@
             });
           }
           return;
-        }
-
-        // Trường hợp C: Không có mã vạch trong khung nhưng dòng vừa chụp ngay trước đó đang thiếu NSX/HSD -> Tự động đọc bù ngày luôn!
-        const latestRec = records.length > 0 ? records[records.length - 1] : null;
-        if (latestRec && (!latestRec.nsx || !latestRec.hsd)) {
-          const onlyDates = await extractNsxHsdWithTimeout(
-            workCanvas,
-            null,
-            3200,
-            true,
-            cropCenterAimFromCanvas(workCanvas)
-          );
-          if (onlyDates.nsx || onlyDates.hsd) {
-            if (onlyDates.nsx) latestRec.nsx = onlyDates.nsx;
-            if (onlyDates.hsd) latestRec.hsd = onlyDates.hsd;
-            persistRecords();
-            enqueueOp({ type: 'update', record: toSyncRecord(latestRec) });
-            renderAll(true);
-            flushSyncQueue(false);
-            playBeep('ok');
-            updateSnapPopCardUI({
-              stateClass: 'state-ok',
-              thumbSrc: finalThumb,
-              badge: '✅ ĐÃ TỰ ĐỘNG BÙ NSX / HSD VÀO TEM TRƯỚC!',
-              title: (latestRec.productName || ('Mã ' + latestRec.productCode)) + ' — ' + formatKg(latestRec.grams) + ' Kg',
-              dates: 'NSX: ' + formatLotDateDisplay(latestRec.nsx) + ' • HSD: ' + formatLotDateDisplay(latestRec.hsd),
-              recordId: latestRec.id,
-              showRescue: !(latestRec.nsx && latestRec.hsd)
-            });
-            return;
-          }
         }
 
         // Trường hợp D: Ảnh mờ / ngoài mặt tem -> Báo đỏ rõ ràng theo chuẩn Fail-Closed (tuyệt đối không tự đoán số liệu!)
