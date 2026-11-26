@@ -75,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v27';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v28';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -835,28 +835,13 @@
       bar.classList.toggle('has-value', Boolean(!customerScanArmed && activeCustomerBarcode));
     }
 
-    // Hiển thị chọn nhanh khách đã quét (ẩn hoàn toàn khi chưa có khách để giao diện gọn)
+    // Bản v28: Không hiển thị thống kê hay liệt kê tên khách dưới ô Tên khách
     if (quickPills) {
-      const custSet = {};
-      for (let i = 0; i < records.length; i++) {
-        const c = cleanCustomerBarcode(records[i].customerBarcode);
-        if (c) custSet[c] = (custSet[c] || 0) + 1;
-      }
-      const custArr = Object.keys(custSet);
-      if (custArr.length > 0) {
-        let html = '';
-        custArr.forEach(function (name) {
-          const isSel = (name === cleanCustomerBarcode(activeCustomerBarcode));
-          html += '<button type="button" class="cust-pill-chip' + (isSel ? ' is-active' : '') + '" data-cust="' + escapeHtml(name) + '">' +
-            escapeHtml(name) + ' (' + custSet[name] + ')' +
-          '</button>';
-        });
-        quickPills.innerHTML = html;
-        quickPills.style.display = 'flex';
-      } else {
-        quickPills.innerHTML = '';
-        quickPills.style.display = 'none';
-      }
+      quickPills.innerHTML = '';
+      quickPills.style.display = 'none';
+    }
+    if (prodBox) {
+      prodBox.style.display = 'none';
     }
 
     if (customerScanArmed) {
@@ -3970,6 +3955,7 @@
       singleScanActive = false;
       refreshRearLensList();
       setShutterUIState('ready');
+      startAutoLiveScanLoop();
     } catch (err) {
       if (statusEl) {
         statusEl.textContent = 'Chưa mở được Máy ảnh (' + (err.message || err) + ') — Bấm "📚 Tải ảnh có sẵn" bên dưới!';
@@ -4366,6 +4352,10 @@
           const committed = commitBatchPhotoScan(parsed, dates, '');
           if (committed.ok && committed.record) {
             const r = committed.record;
+            // Ghi nhận xong -> tự động trả Ô 1 (Tên khách) về khoảng trắng!
+            if (activeCustomerBarcode) {
+              setActiveCustomerBarcode('', true);
+            }
             renderAll(true);
             flushSyncQueue(false);
             playBeep('ok');
@@ -4945,7 +4935,126 @@
     });
   }
 
+  // ==================== TỰ ĐỘNG QUÉT LIÊN TỤC KÊU BÍP (KHÔNG CẦN BẤM CHỤP) ====================
+  let autoLiveScanTimer = null;
+  let autoLiveScanBusy = false;
+  let autoScanCooldownUntil = 0;
+  let lastAutoBarcode = '';
+  let lastAutoBarcodeAt = 0;
+  let autoScanCanvas = null;
+
+  function unlockAudioForAutoBeep() {
+    try {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      if (!audioCtx) audioCtx = new Ctx();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+  }
+
+  function stopAutoLiveScanLoop() {
+    if (autoLiveScanTimer) {
+      clearInterval(autoLiveScanTimer);
+      autoLiveScanTimer = null;
+    }
+    autoLiveScanBusy = false;
+  }
+
+  function startAutoLiveScanLoop() {
+    stopAutoLiveScanLoop();
+    autoLiveScanTimer = setInterval(async function () {
+      if (!cameraActive || autoLiveScanBusy || pendingSnapJobsCount > 0) return;
+      const now = Date.now();
+      if (now < autoScanCooldownUntil) return;
+
+      const video = document.getElementById('cameraVideo');
+      if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) return;
+
+      autoLiveScanBusy = true;
+      try {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        const scale = Math.min(1, 960 / Math.max(vw, vh));
+        const cw = Math.max(160, Math.round(vw * scale));
+        const ch = Math.max(120, Math.round(vh * scale));
+        if (!autoScanCanvas) autoScanCanvas = document.createElement('canvas');
+        if (autoScanCanvas.width !== cw || autoScanCanvas.height !== ch) {
+          autoScanCanvas.width = cw;
+          autoScanCanvas.height = ch;
+        }
+        const ctx = autoScanCanvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(video, 0, 0, cw, ch);
+
+        if (customerScanArmed) {
+          // Bước 1: Tự động quét mã Tên khách -> kêu Bíp -> ghi vào Ô 1 -> tự nhảy sang Ô 2!
+          const custHit = await decodeCustomer1DBarcode(null, autoScanCanvas);
+          const custCode = custHit ? cleanCustomerBarcode(custHit.code) : '';
+          if (custCode && !(custCode === lastAutoBarcode && (Date.now() - lastAutoBarcodeAt) < 2200)) {
+            lastAutoBarcode = custCode;
+            lastAutoBarcodeAt = Date.now();
+            autoScanCooldownUntil = Date.now() + 1100;
+            triggerShutterFlashEffect();
+            setActiveCustomerBarcode(custCode, true);
+            playBeep('ok');
+            vibrateDevice([40]);
+            const thumb = createThumbnailDataUrl(autoScanCanvas, 160);
+            updateSnapPopCardUI({
+              stateClass: 'state-ok',
+              thumbSrc: thumb,
+              badge: '✅ ĐÃ QUÉT TÊN KHÁCH',
+              title: custCode,
+              dates: 'Đã nhảy sang Ô 2 — Đưa tem sản phẩm vào quét!',
+              recordId: null,
+              showRescue: false
+            });
+          }
+        } else {
+          // Bước 2: Tự động quét mã tem Sản phẩm -> kêu Bíp -> ghi Mã, Tên, Số ký -> trả Ô 1 về khoảng trắng!
+          const hit = await decodePhotoInBrowserWasm(null, autoScanCanvas);
+          const parsed = (hit && hit.code) ? parseSingle13DigitScaleBarcode(hit.code) : null;
+          if (parsed && parsed.ok) {
+            if (parsed.rawBarcode === lastAutoBarcode && (Date.now() - lastAutoBarcodeAt) < 2200) {
+              return;
+            }
+            lastAutoBarcode = parsed.rawBarcode;
+            lastAutoBarcodeAt = Date.now();
+            autoScanCooldownUntil = Date.now() + 1200;
+
+            triggerShutterFlashEffect();
+            const committed = commitBatchPhotoScan(parsed, { nsx: '', hsd: '' }, '');
+            if (committed.ok && committed.record) {
+              const r = committed.record;
+              // Ghi nhận xong -> tự động trả Ô 1 (Tên khách) về khoảng trắng!
+              if (activeCustomerBarcode) {
+                setActiveCustomerBarcode('', true);
+              }
+              renderAll(true);
+              flushSyncQueue(false);
+              playBeep('ok');
+              vibrateDevice([40]);
+              const thumb = createThumbnailDataUrl(autoScanCanvas, 160);
+              const custLabel = r.customerBarcode ? ('Khách: ' + r.customerBarcode) : 'Khách: —';
+              updateSnapPopCardUI({
+                stateClass: 'state-ok',
+                thumbSrc: thumb,
+                badge: '✅ ĐÃ GHI NHẬN',
+                title: (r.productName || ('Mã ' + r.productCode)) + ' (' + r.productCode + ') — ' + formatKg(r.grams) + ' Kg',
+                dates: custLabel,
+                recordId: r.id,
+                showRescue: false
+              });
+            }
+          }
+        }
+      } catch (e) {
+      } finally {
+        autoLiveScanBusy = false;
+      }
+    }, 150);
+  }
+
   function stopCamera1DScanner() {
+    stopAutoLiveScanLoop();
     cameraActive = false;
     singleScanActive = false;
     imageCaptureDevice = null;
@@ -6451,13 +6560,18 @@
     }
 
     function openCameraDrawer(forCustomer) {
+      unlockAudioForAutoBeep();
       const camCard = document.getElementById('cameraBoxCard');
       customerScanArmed = Boolean(forCustomer);
       syncCustomerScanBarUI();
       if (camCard) {
         camCard.style.display = 'block';
       }
-      startCamera1DScanner();
+      if (!cameraActive) {
+        startCamera1DScanner();
+      } else {
+        startAutoLiveScanLoop();
+      }
     }
 
     function closeCameraDrawer() {
