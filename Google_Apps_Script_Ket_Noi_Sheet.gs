@@ -11,11 +11,11 @@
  */
 
 const TARGET_SPREADSHEET_ID = '1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk';
-const SHEET_CHI_TIET = 'Chi_Tiet_Scan';
-const SHEET_TONG_HOP = 'Tong_Hop_Ton';
+const SHEET_CHI_TIET = 'Du_Lieu_Scan';
+const SHEET_TONG_HOP = 'Tong_Hop_Moi';
 const SHEET_DANH_MUC = 'Danh_Muc_SP';
 const APP_ONLINE_URL = 'https://longdoanthanh-bot.github.io/scan-ton-kho/';
-const SCRIPT_VERSION = 'v12_6_fields_clean';
+const SCRIPT_VERSION = 'v13_isolated_6_fields';
 
 function getTargetSpreadsheet() {
   try {
@@ -281,13 +281,7 @@ function formatDetailHeader(shDetail) {
 function ensureSheetsExist(ss) {
   let shDetail = ss.getSheetByName(SHEET_CHI_TIET);
   if (!shDetail) {
-    const sheets = ss.getSheets();
-    if (sheets.length > 0 && sheets[0].getLastRow() <= 1) {
-      shDetail = sheets[0];
-      shDetail.setName(SHEET_CHI_TIET);
-    } else {
-      shDetail = ss.insertSheet(SHEET_CHI_TIET, 0);
-    }
+    shDetail = ss.insertSheet(SHEET_CHI_TIET, 0);
   }
 
   let shSum = ss.getSheetByName(SHEET_TONG_HOP);
