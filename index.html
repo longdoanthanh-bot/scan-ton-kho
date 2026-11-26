@@ -10,7 +10,7 @@
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=28">
+  <link rel="stylesheet" href="./styles.css?v=29">
 </head>
 <body>
 
@@ -26,7 +26,7 @@
 
       <div class="two-box-form">
 
-        <!-- Ô 1: TÊN KHÁCH (Bấm biểu tượng máy ảnh -> Quét xong tự ghi vào ô này & nhảy sang Ô 2) -->
+        <!-- Ô 1: TÊN KHÁCH (Hỗ trợ cả tia hồng ngoại PDA + Camera 📷 + gõ tay -> Có thông tin chuyển xanh + dấu tích ✅) -->
         <div id="customerScanBar" class="customer-scan-bar form-field-box">
           <div class="customer-bar-head" style="display:none;">
             <span id="customerStepIndicator">1</span>
@@ -34,11 +34,14 @@
             <span id="customerActiveChip" style="display:none;"></span>
           </div>
 
-          <label class="two-box-label" for="customerBarcodeInput">1. Tên khách <span class="two-box-opt">(không bắt buộc)</span></label>
+          <div class="two-box-label-row">
+            <label class="two-box-label" for="customerBarcodeInput">1. Tên khách <span class="two-box-opt">(không bắt buộc)</span></label>
+            <span id="custDoneTick" class="field-done-tick" style="display:none;">✅ Đã nhận</span>
+          </div>
           <div class="two-box-row">
-            <input type="text" id="customerBarcodeInput" class="two-box-input" autocomplete="off" placeholder="Trống — bấm 📷 để quét hoặc gõ tay">
+            <input type="text" id="customerBarcodeInput" class="two-box-input" autocomplete="off" placeholder="Bắn tia PDA, bấm 📷 hoặc gõ tay...">
             <button type="button" id="btnClearCustomerBarcode" class="two-box-clear-btn" style="display:none;" title="Xóa tên khách">✕</button>
-            <button type="button" id="btnScanCustomerBarcode" class="two-box-cam-btn" title="Bấm để quét mã tên khách">📷</button>
+            <button type="button" id="btnScanCustomerBarcode" class="two-box-cam-btn" title="Bấm mở máy ảnh quét tên khách">📷</button>
             <button type="button" id="btnSaveCustomerInput" style="display:none;"></button>
             <button type="button" id="btnNextCustomer" style="display:none;"></button>
           </div>
@@ -51,15 +54,17 @@
           </div>
         </div>
 
-        <!-- Ô 2: SẢN PHẨM (Tự nhảy vào đây sau Bước 1 — Bấm 📷 quét/chụp lấy Mã SP, Tên SP, Số ký) -->
+        <!-- Ô 2: SẢN PHẨM (Tự nhảy vào đây sau Bước 1 — Hỗ trợ cả tia hồng ngoại PDA + Camera 📷 -> Có thông tin chuyển xanh + dấu tích ✅) -->
         <section id="latestScanCard" class="latest-card form-field-box product-step-box">
-          <div class="two-box-label">2. Mã SP • Tên SP • Số ký</div>
+          <div class="two-box-label-row">
+            <label class="two-box-label" for="pdaProductInput">2. Mã SP • Tên SP • Số ký</label>
+            <span id="prodDoneTick" class="field-done-tick" style="display:none;">✅ Đã ghi nhận</span>
+          </div>
           <div class="two-box-row">
             <div class="two-box-product-display" id="productFieldDisplay">
-              <div id="latestEmptyState" class="two-box-placeholder">
-                Trống — bấm 📷 để quét Mã SP, Tên SP, Số ký
-              </div>
-              <div id="latestContentState" style="display:none;">
+              <input type="text" id="pdaProductInput" class="pda-product-input" autocomplete="off" placeholder="Bắn tia PDA hoặc bấm 📷 để quét tem...">
+              <div id="latestEmptyState" style="display:none;"></div>
+              <div id="latestContentState" style="display:none;margin-top:6px;">
                 <div class="two-box-prod-line">
                   <strong id="latestCode" class="tb-code">—</strong>
                   <span id="latestName" class="tb-name">—</span>
@@ -79,7 +84,7 @@
                 <button type="button" id="btnScanDatesLatest" style="display:none;"></button>
               </div>
             </div>
-            <button type="button" id="btnQuickScanProduct" class="two-box-cam-btn prod-cam" title="Bấm để quét/chụp Mã SP, Tên SP, Số ký">📷</button>
+            <button type="button" id="btnQuickScanProduct" class="two-box-cam-btn prod-cam" title="Bấm mở máy ảnh quét Mã SP, Tên SP, Số ký">📷</button>
           </div>
         </section>
 
@@ -292,7 +297,7 @@
         <div class="settings-hero-top">
           <div>
             <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-            <div class="brand-sub">Bản v28 Tự Quét Bíp • Không Cần Bấm Chụp • Xóa Trắng KH Sau Khi Ghi Nhận</div>
+            <div class="brand-sub">Bản v29 PDA Tia Hồng Ngoại + Camera Tự Bíp • Tích Xanh ✅ 2 Ô</div>
           </div>
           <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
             <span id="syncStatusDot" class="sync-dot"></span>
@@ -501,7 +506,7 @@
   <!-- Bộ giải mã mã vạch 1D siêu tốc nạp cục bộ (đã gỡ bỏ hoàn toàn OCR NSX/HSD cho nhẹ và nhanh tức thì) -->
   <script src="./vendor/zxing_wasm_reader.js?v=20"></script>
   <script src="./catalog.js?v=20"></script>
-  <script src="./apps_script_embed.js?v=28"></script>
-  <script src="./app.js?v=28"></script>
+  <script src="./apps_script_embed.js?v=29"></script>
+  <script src="./app.js?v=29"></script>
 </body>
 </html>

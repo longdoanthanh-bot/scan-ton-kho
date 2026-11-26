@@ -75,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v28';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v29';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -832,7 +832,13 @@
     }
     if (bar) {
       bar.classList.toggle('is-armed', Boolean(customerScanArmed));
-      bar.classList.toggle('has-value', Boolean(!customerScanArmed && activeCustomerBarcode));
+      const hasCust = Boolean(!customerScanArmed && activeCustomerBarcode);
+      bar.classList.toggle('has-value', hasCust);
+      bar.classList.toggle('field-ok', hasCust);
+    }
+    const custTick = document.getElementById('custDoneTick');
+    if (custTick) {
+      custTick.style.display = (!customerScanArmed && activeCustomerBarcode) ? 'inline-flex' : 'none';
     }
 
     // Bản v28: Không hiển thị thống kê hay liệt kê tên khách dưới ô Tên khách
@@ -3135,15 +3141,19 @@
     const emptyState = document.getElementById('latestEmptyState');
     const contentState = document.getElementById('latestContentState');
 
+    const prodTick = document.getElementById('prodDoneTick');
     if (records.length === 0) {
-      emptyState.style.display = 'block';
+      emptyState.style.display = 'none';
       contentState.style.display = 'none';
-      card.classList.remove('flash-ok', 'flash-warn');
+      card.classList.remove('flash-ok', 'flash-warn', 'field-ok');
+      if (prodTick) prodTick.style.display = 'none';
       return;
     }
 
     emptyState.style.display = 'none';
     contentState.style.display = 'block';
+    card.classList.add('field-ok');
+    if (prodTick) prodTick.style.display = 'inline-flex';
 
     const latest = records[records.length - 1];
     document.getElementById('latestTime').textContent = latest.scannedAt;
@@ -5024,9 +5034,9 @@
             const committed = commitBatchPhotoScan(parsed, { nsx: '', hsd: '' }, '');
             if (committed.ok && committed.record) {
               const r = committed.record;
-              // Ghi nhận xong -> tự động trả Ô 1 (Tên khách) về khoảng trắng!
+              // Ghi nhận xong -> giữ tích xanh 650ms cho dễ nhìn rồi tự động trả Ô 1 (Tên khách) về khoảng trắng!
               if (activeCustomerBarcode) {
-                setActiveCustomerBarcode('', true);
+                setTimeout(function () { setActiveCustomerBarcode('', true); }, 650);
               }
               renderAll(true);
               flushSyncQueue(false);
@@ -6534,15 +6544,88 @@
           e.preventDefault();
           const clean = cleanCustomerBarcode(custInpEl.value);
           setActiveCustomerBarcode(clean, true);
-          custInpEl.blur();
-          if (clean) {
-            showBanner('ok', '✅ Đã ghi nhận Khách hàng: "' + clean + '" (Tự nhập tay) — Giờ hãy chụp các tem sản phẩm!');
+          playBeep('ok');
+          const pdaProdInp = document.getElementById('pdaProductInput');
+          if (pdaProdInp) {
+            pdaProdInp.focus();
           } else {
-            showBanner('ok', '⏭️ Đã để trống Khách hàng (hiển thị "—") — Chụp sản phẩm ngay!');
+            custInpEl.blur();
           }
         }
       });
     }
+
+    // ==================== HỖ TRỢ QUÉT TIA HỒNG NGOẠI MÁY PDA SONG SONG VỚI CAMERA ====================
+    function handlePdaBarcodeSubmission(rawCode) {
+      const code = String(rawCode || '').replace(/[\r\n\t]+/g, '').trim();
+      if (!code) return;
+      unlockAudioForAutoBeep();
+
+      const parsed = parseSingle13DigitScaleBarcode(code);
+      if (parsed && parsed.ok) {
+        const committed = commitBatchPhotoScan(parsed, { nsx: '', hsd: '' }, '');
+        if (committed.ok && committed.record) {
+          const r = committed.record;
+          renderAll(true);
+          flushSyncQueue(false);
+          playBeep('ok');
+          vibrateDevice([40]);
+          if (activeCustomerBarcode) {
+            setTimeout(function () { setActiveCustomerBarcode('', true); }, 650);
+          }
+          showBanner('ok', '✅ PDA: ' + (r.customerBarcode ? ('[' + r.customerBarcode + '] ') : '') + (r.productName || ('Mã ' + r.productCode)) + ' — ' + formatKg(r.grams) + ' Kg');
+        }
+      } else {
+        // Nếu tia PDA bắn mã không phải tem cân 13 số -> tự nhận là Tên / Mã khách hàng -> điền Ô 1 (xanh ✅) & nhảy sang Ô 2!
+        const custClean = cleanCustomerBarcode(code);
+        if (custClean) {
+          setActiveCustomerBarcode(custClean, true);
+          playBeep('ok');
+          vibrateDevice([35]);
+          const pdaProd = document.getElementById('pdaProductInput');
+          if (pdaProd) pdaProd.focus();
+        } else {
+          playBeep('error');
+        }
+      }
+    }
+
+    const pdaProdInput = document.getElementById('pdaProductInput');
+    if (pdaProdInput) {
+      pdaProdInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          const val = String(pdaProdInput.value || '').trim();
+          pdaProdInput.value = '';
+          if (val) handlePdaBarcodeSubmission(val);
+        }
+      });
+    }
+
+    // Bắt tia hồng ngoại PDA toàn màn hình ngay cả khi chưa chạm vào ô nào!
+    let globalPdaBuf = '';
+    let globalPdaLastTs = 0;
+    document.addEventListener('keydown', function (e) {
+      const tabScanEl = document.getElementById('tabScan');
+      if (!tabScanEl || !tabScanEl.classList.contains('active')) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
+      const now = Date.now();
+      if (now - globalPdaLastTs > 140) globalPdaBuf = '';
+      globalPdaLastTs = now;
+      if (e.key === 'Enter') {
+        if (globalPdaBuf.length >= 3) {
+          e.preventDefault();
+          const scanned = globalPdaBuf;
+          globalPdaBuf = '';
+          handlePdaBarcodeSubmission(scanned);
+        } else {
+          globalPdaBuf = '';
+        }
+      } else if (e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        globalPdaBuf += e.key;
+      }
+    });
 
     // Nút Lưu / Ghi nhận khi người dùng gõ tay khách hàng (Cách 2)
     const btnSaveCust = document.getElementById('btnSaveCustomerInput');
