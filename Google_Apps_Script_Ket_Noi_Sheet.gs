@@ -6,7 +6,7 @@
  * + Đồng bộ tức thì khi xóa/sửa dòng trực tiếp trên Sheet
  * ============================================================================
  * - Google Sheet gắn cố định: https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0
- * - Đường truyền Web App (/exec): https://script.google.com/macros/s/AKfycbxlF9UorbWyYzxFA4avEIkloBab44VZzqznaxTXSSTAZtb13QRp5GQoHb_KGCAnAayg/exec
+ * - Đường truyền Web App (/exec): https://script.google.com/macros/s/AKfycbw_vz2A35sbBHaPgDSkCuUFl_fW7QIsghCsACc92aDs_kyOiC9ea39ZpyWu3_MaccTn/exec
  * ============================================================================
  */
 

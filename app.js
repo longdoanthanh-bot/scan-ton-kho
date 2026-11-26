@@ -43,7 +43,8 @@
 
   const WASM_1D_OPTIONS = WASM_1D_LOCAL_OPTIONS;
 
-  const DEFAULT_SHEET_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbxlF9UorbWyYzxFA4avEIkloBab44VZzqznaxTXSSTAZtb13QRp5GQoHb_KGCAnAayg/exec';
+  const LEGACY_SHEET_WEB_APP_ID = 'AKfycbxlF9UorbWyYzxFA4avEIkloBab44VZzqznaxTXSSTAZtb13QRp5GQoHb_KGCAnAayg';
+  const DEFAULT_SHEET_WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbw_vz2A35sbBHaPgDSkCuUFl_fW7QIsghCsACc92aDs_kyOiC9ea39ZpyWu3_MaccTn/exec';
   const DEFAULT_SHEET_VIEW_URL = 'https://docs.google.com/spreadsheets/d/1jmwE8LBV4XroBIKVohHFDXwWjEhDwSHZnUb-ziLrDgk/edit?gid=0#gid=0';
 
   // State
@@ -74,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v21';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v23';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -478,7 +479,10 @@
         localStorage.setItem('scan_ton_v18_no_ok', '1');
         localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(settings));
       }
-      if (!settings.sheetWebAppUrl) settings.sheetWebAppUrl = DEFAULT_SHEET_WEB_APP_URL;
+      if (!settings.sheetWebAppUrl || String(settings.sheetWebAppUrl).indexOf(LEGACY_SHEET_WEB_APP_ID) !== -1) {
+        settings.sheetWebAppUrl = DEFAULT_SHEET_WEB_APP_URL;
+        localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(settings));
+      }
       if (!settings.sheetViewUrl) settings.sheetViewUrl = DEFAULT_SHEET_VIEW_URL;
     } catch (e) {}
   }
@@ -623,7 +627,10 @@
       if (vaultSettings && !settings.sheetWebAppUrl && vaultSettings.sheetWebAppUrl) {
         settings = Object.assign(settings, vaultSettings);
       }
-      if (!settings.sheetWebAppUrl) settings.sheetWebAppUrl = DEFAULT_SHEET_WEB_APP_URL;
+      if (!settings.sheetWebAppUrl || String(settings.sheetWebAppUrl).indexOf(LEGACY_SHEET_WEB_APP_ID) !== -1) {
+        settings.sheetWebAppUrl = DEFAULT_SHEET_WEB_APP_URL;
+        localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(settings));
+      }
       if (!settings.sheetViewUrl) settings.sheetViewUrl = DEFAULT_SHEET_VIEW_URL;
     }
   }
