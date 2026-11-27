@@ -75,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v32';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v33';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -478,11 +478,7 @@
         const parsed = JSON.parse(raw);
         settings = Object.assign(settings, parsed);
       }
-      if (!localStorage.getItem('scan_ton_v18_no_ok')) {
-        settings.duplicateAskSec = 0;
-        localStorage.setItem('scan_ton_v18_no_ok', '1');
-        localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(settings));
-      }
+      settings.duplicateAskSec = 0;
       if (!settings.sheetWebAppUrl || String(settings.sheetWebAppUrl).indexOf(LEGACY_SHEET_WEB_APP_ID) !== -1) {
         settings.sheetWebAppUrl = DEFAULT_SHEET_WEB_APP_URL;
         localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(settings));
@@ -5067,7 +5063,7 @@
           // Bước 1: Tự động quét mã Tên khách -> kêu Bíp -> ghi vào Ô 1 -> tự nhảy sang Ô 2!
           const custHit = await decodeCustomer1DBarcode(null, autoScanCanvas);
           const custCode = custHit ? cleanCustomerBarcode(custHit.code) : '';
-          if (custCode && !(custCode === lastAutoBarcode && (Date.now() - lastAutoBarcodeAt) < 2200)) {
+          if (custCode && !(custCode === lastAutoBarcode && (Date.now() - lastAutoBarcodeAt) < 1400)) {
             lastAutoBarcode = custCode;
             lastAutoBarcodeAt = Date.now();
             autoScanCooldownUntil = Date.now() + 1100;
@@ -5093,7 +5089,7 @@
           const hit = await decodePhotoInBrowserWasm(null, autoScanCanvas);
           const parsed = (hit && hit.code) ? parseSingle13DigitScaleBarcode(hit.code) : null;
           if (parsed && parsed.ok) {
-            if (parsed.rawBarcode === lastAutoBarcode && (Date.now() - lastAutoBarcodeAt) < 2200) {
+            if (parsed.rawBarcode === lastAutoBarcode && (Date.now() - lastAutoBarcodeAt) < 1400) {
               return;
             }
             lastAutoBarcode = parsed.rawBarcode;
