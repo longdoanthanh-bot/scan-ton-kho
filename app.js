@@ -75,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v33';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v34';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -5061,31 +5061,76 @@
 
         if (customerScanArmed) {
           // Bước 1: Tự động quét mã Tên khách -> kêu Bíp -> ghi vào Ô 1 -> tự nhảy sang Ô 2!
+          // (Nếu đưa thẳng tem cân 13 số vào lúc đang ở Ô 1 -> tự nhận là bỏ qua tên khách và ghi thẳng vào Ô 2 luôn!)
           const custHit = await decodeCustomer1DBarcode(null, autoScanCanvas);
           const custCode = custHit ? cleanCustomerBarcode(custHit.code) : '';
           if (custCode && !(custCode === lastAutoBarcode && (Date.now() - lastAutoBarcodeAt) < 1400)) {
-            lastAutoBarcode = custCode;
-            lastAutoBarcodeAt = Date.now();
-            autoScanCooldownUntil = Date.now() + 1100;
-            triggerShutterFlashEffect();
-            setActiveCustomerBarcode(custCode, true);
-            playBeep('ok');
-            vibrateDevice([40]);
-            const pdaProdAfterCam = document.getElementById('pdaProductInput');
-            if (pdaProdAfterCam) pdaProdAfterCam.focus();
-            const thumb = createThumbnailDataUrl(autoScanCanvas, 160);
-            updateSnapPopCardUI({
-              stateClass: 'state-ok',
-              thumbSrc: thumb,
-              badge: '✅ ĐÃ QUÉT TÊN KHÁCH',
-              title: custCode,
-              dates: 'Đã nhảy sang Ô 2 — Đưa tem sản phẩm vào quét!',
-              recordId: null,
-              showRescue: false
-            });
+            const maybeScaleInStep1 = parseSingle13DigitScaleBarcode(custCode);
+            if (maybeScaleInStep1 && maybeScaleInStep1.ok) {
+              // Bỏ qua Ô 1, ghi nhận thẳng sản phẩm vào Ô 2 rồi quay lại Ô 1!
+              lastAutoBarcode = maybeScaleInStep1.rawBarcode;
+              lastAutoBarcodeAt = Date.now();
+              autoScanCooldownUntil = Date.now() + 1100;
+              triggerShutterFlashEffect();
+              setActiveCustomerBarcode('', false);
+              const committed1 = commitBatchPhotoScan(maybeScaleInStep1, { nsx: '', hsd: '' }, '');
+              if (committed1.ok && committed1.record) {
+                const r1 = committed1.record;
+                const dup1 = getDuplicateCodeWeightInfo(r1);
+                if (dup1.isDup && (!r1.note || r1.note.indexOf('TRÙNG') === -1)) {
+                  r1.note = '⚠️ TRÙNG MÃ + SỐ KÝ (x' + dup1.count + ')';
+                  persistRecords();
+                  enqueueOp({ type: 'update', record: toSyncRecord(r1) });
+                }
+                renderAll(true);
+                flushSyncQueue(false);
+                if (dup1.isDup) {
+                  playBeep('warn');
+                  setTimeout(function () { playBeep('warn'); }, 220);
+                  vibrateDevice([120, 60, 120]);
+                } else {
+                  playBeep('ok');
+                  vibrateDevice([40]);
+                }
+                const thumb1 = createThumbnailDataUrl(autoScanCanvas, 160);
+                updateSnapPopCardUI({
+                  stateClass: dup1.isDup ? 'state-err' : 'state-ok',
+                  thumbSrc: thumb1,
+                  badge: dup1.isDup ? ('⚠️ CẢNH BÁO TRÙNG MÃ + SỐ KÝ (x' + dup1.count + ')') : '✅ ĐÃ GHI NHẬN',
+                  title: (r1.productName || ('Mã ' + r1.productCode)) + ' (' + r1.productCode + ') — ' + formatKg(r1.grams) + ' Kg',
+                  dates: 'Khách: — (Sẵn sàng quét tiếp Ô 1)',
+                  recordId: r1.id,
+                  showRescue: false
+                });
+                customerScanArmed = true;
+                syncCustomerScanBarUI();
+                const c1a = document.getElementById('customerBarcodeInput');
+                if (c1a) c1a.focus();
+              }
+            } else {
+              lastAutoBarcode = custCode;
+              lastAutoBarcodeAt = Date.now();
+              autoScanCooldownUntil = Date.now() + 1000;
+              triggerShutterFlashEffect();
+              setActiveCustomerBarcode(custCode, true);
+              playBeep('ok');
+              vibrateDevice([40]);
+              const pdaProdAfterCam = document.getElementById('pdaProductInput');
+              if (pdaProdAfterCam) pdaProdAfterCam.focus();
+              const thumb = createThumbnailDataUrl(autoScanCanvas, 160);
+              updateSnapPopCardUI({
+                stateClass: 'state-ok',
+                thumbSrc: thumb,
+                badge: '✅ ĐÃ QUÉT TÊN KHÁCH',
+                title: custCode,
+                dates: 'Đã nhảy sang Ô 2 — Đưa tem sản phẩm vào quét!',
+                recordId: null,
+                showRescue: false
+              });
+            }
           }
         } else {
-          // Bước 2: Tự động quét mã tem Sản phẩm -> kêu Bíp -> ghi Mã, Tên, Số ký -> trả Ô 1 về khoảng trắng!
+          // Bước 2: Tự động quét mã tem Sản phẩm -> kêu Bíp -> ghi Mã, Tên, Số ký -> trả Ô 1 về khoảng trắng & tự nhảy quay lại Ô 1!
           const hit = await decodePhotoInBrowserWasm(null, autoScanCanvas);
           const parsed = (hit && hit.code) ? parseSingle13DigitScaleBarcode(hit.code) : null;
           if (parsed && parsed.ok) {
@@ -5094,7 +5139,7 @@
             }
             lastAutoBarcode = parsed.rawBarcode;
             lastAutoBarcodeAt = Date.now();
-            autoScanCooldownUntil = Date.now() + 1200;
+            autoScanCooldownUntil = Date.now() + 1000;
 
             triggerShutterFlashEffect();
             const committed = commitBatchPhotoScan(parsed, { nsx: '', hsd: '' }, '');
@@ -5108,9 +5153,11 @@
                 persistRecords();
                 enqueueOp({ type: 'update', record: toSyncRecord(r) });
               }
-              // Ghi nhận xong -> giữ tích xanh 650ms rồi trả Ô 1 về khoảng trắng & tự động nhảy con trỏ về Ô 1!
+              // Ghi nhận xong -> giữ tích xanh 650ms rồi trả Ô 1 về khoảng trắng & tự động quay lại Ô 1 (cả Camera lẫn con trỏ)!
               setTimeout(function () {
-                if (activeCustomerBarcode) setActiveCustomerBarcode('', true);
+                if (activeCustomerBarcode) setActiveCustomerBarcode('', false);
+                customerScanArmed = true;
+                syncCustomerScanBarUI();
                 const c1 = document.getElementById('customerBarcodeInput');
                 if (c1) c1.focus();
               }, 650);
@@ -5125,7 +5172,7 @@
                 vibrateDevice([40]);
               }
               const thumb = createThumbnailDataUrl(autoScanCanvas, 160);
-              const custLabel = r.customerBarcode ? ('Khách: ' + r.customerBarcode) : 'Khách: —';
+              const custLabel = r.customerBarcode ? ('Khách: ' + r.customerBarcode + ' ➜ Quay lại Ô 1') : 'Khách: — ➜ Quay lại Ô 1';
               updateSnapPopCardUI({
                 stateClass: dupCheck.isDup ? 'state-err' : 'state-ok',
                 thumbSrc: thumb,
