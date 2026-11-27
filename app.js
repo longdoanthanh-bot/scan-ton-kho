@@ -75,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v30';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v31';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -6015,8 +6015,12 @@
         workCtx.save();
         workCtx.translate(tw / 2, th / 2);
         if (p.deg !== 0) workCtx.rotate((p.deg * Math.PI) / 180);
+        if (p.deStreak) {
+          workCtx.filter = 'blur(1.25px) contrast(2.3)';
+        }
         workCtx.drawImage(drawSource, sx, sy, sw, sh, -dw / 2, -dh / 2, dw, dh);
         workCtx.restore();
+        workCtx.filter = 'none';
 
         if (p.nat && p.deg === 0) {
           const natDet = await ensureNativeCustomerDetector();
@@ -6065,6 +6069,44 @@
         if (jsEanHit && jsEanHit.code) {
           if (bmp.close) bmp.close();
           return { code: jsEanHit.code };
+        }
+      }
+
+      // Lượt dự phòng chuyên trị QR tem in nhiệt bị xước sọc trắng ngang (nối liền vết xước bằng blur + tăng tương phản)
+      if (window.ZXingWASM && window.ZXingWASM.readBarcodesFromImageData) {
+        const deStreakCrops = [
+          { sx: 0, sy: 0, sw: bw, sh: bh },
+          { sx: 0, sy: Math.round(bh * 0.08), sw: Math.round(bw * 0.52), sh: Math.round(bh * 0.84) }
+        ];
+        for (let ds = 0; ds < deStreakCrops.length; ds++) {
+          const dc = deStreakCrops[ds];
+          const dRatio = Math.min(1.4, 720 / Math.max(1, Math.max(dc.sw, dc.sh)));
+          const ddw = Math.max(180, Math.round(dc.sw * dRatio));
+          const ddh = Math.max(140, Math.round(dc.sh * dRatio));
+          const dpad = 24;
+          workCanvas.width = ddw + dpad * 2;
+          workCanvas.height = ddh + dpad * 2;
+          workCtx.filter = 'none';
+          workCtx.fillStyle = '#ffffff';
+          workCtx.fillRect(0, 0, workCanvas.width, workCanvas.height);
+          workCtx.save();
+          workCtx.filter = 'blur(1.25px) contrast(2.3)';
+          workCtx.drawImage(drawSource, dc.sx, dc.sy, dc.sw, dc.sh, dpad, dpad, ddw, ddh);
+          workCtx.restore();
+          workCtx.filter = 'none';
+          const dsImg = workCtx.getImageData(0, 0, workCanvas.width, workCanvas.height);
+          try {
+            const dsHits = await window.ZXingWASM.readBarcodesFromImageData(dsImg, WASM_CUSTOMER_1D_OPTIONS);
+            if (dsHits && dsHits.length > 0) {
+              for (let k = 0; k < dsHits.length; k++) {
+                const txt = cleanCustomerBarcode(dsHits[k].text);
+                if (txt) {
+                  if (bmp.close) bmp.close();
+                  return { code: txt };
+                }
+              }
+            }
+          } catch (eDs) {}
         }
       }
       if (bmp.close) bmp.close();
@@ -6614,8 +6656,26 @@
 
     const custInpEl = document.getElementById('customerBarcodeInput');
     if (custInpEl) {
+      let lastCustLen = 0;
+      let pdaPasteJumpTimer = null;
       custInpEl.addEventListener('input', function (e) {
-        setActiveCustomerBarcode(e.target.value, false);
+        const val = String(e.target.value || '');
+        const delta = val.length - lastCustLen;
+        lastCustLen = val.length;
+        setActiveCustomerBarcode(val, false);
+        // Nếu máy PDA bắn/dán nguyên chuỗi chữ (kể cả tiếng Việt có dấu như 'DIỆU BÌNH') mà không kèm Enter -> tự nhận & nhảy sang Ô 2!
+        if (pdaPasteJumpTimer) clearTimeout(pdaPasteJumpTimer);
+        if (delta >= 3 && cleanCustomerBarcode(val)) {
+          pdaPasteJumpTimer = setTimeout(function () {
+            const clean = cleanCustomerBarcode(custInpEl.value);
+            if (clean) {
+              setActiveCustomerBarcode(clean, true);
+              playBeep('ok');
+              const pdaProdInp = document.getElementById('pdaProductInput');
+              if (pdaProdInp) pdaProdInp.focus();
+            }
+          }, 260);
+        }
       });
       custInpEl.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
