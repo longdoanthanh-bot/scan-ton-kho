@@ -75,7 +75,7 @@
   let activeRecordCustomerFilter = 'ALL';
   let customerProdListExpanded = false;
 
-  const APP_CACHE_VERSION = 'scan-ton-kho-v31';
+  const APP_CACHE_VERSION = 'scan-ton-kho-v32';
   const STORAGE_APP_VERSION = 'scan_ton_app_ver_v1';
 
   // 1-Tap Still-Photo Camera, ImageCapture, Batch Upload & Offline OCR state
@@ -397,7 +397,11 @@
     updateOfflineBannerUI();
     refreshSettingsSheetLinkUI();
 
-    // Bản v27: Camera đóng gọn mặc định để màn hình chỉ có 2 ô trống; chỉ mở khi bấm biểu tượng 📷 ở Ô 1 hoặc Ô 2!
+    // Bản v32: Mới mở màn hình Scan -> đặt sẵn con trỏ vào Ô 1 (Tên khách) để bắn PDA ngay!
+    setTimeout(function () {
+      const c1 = document.getElementById('customerBarcodeInput');
+      if (c1) c1.focus();
+    }, 120);
 
     renderAll();
     registerAndAutoUpdateServiceWorker();
@@ -5071,6 +5075,8 @@
             setActiveCustomerBarcode(custCode, true);
             playBeep('ok');
             vibrateDevice([40]);
+            const pdaProdAfterCam = document.getElementById('pdaProductInput');
+            if (pdaProdAfterCam) pdaProdAfterCam.focus();
             const thumb = createThumbnailDataUrl(autoScanCanvas, 160);
             updateSnapPopCardUI({
               stateClass: 'state-ok',
@@ -5106,10 +5112,12 @@
                 persistRecords();
                 enqueueOp({ type: 'update', record: toSyncRecord(r) });
               }
-              // Ghi nhận xong -> giữ tích xanh 650ms cho dễ nhìn rồi tự động trả Ô 1 (Tên khách) về khoảng trắng!
-              if (activeCustomerBarcode) {
-                setTimeout(function () { setActiveCustomerBarcode('', true); }, 650);
-              }
+              // Ghi nhận xong -> giữ tích xanh 650ms rồi trả Ô 1 về khoảng trắng & tự động nhảy con trỏ về Ô 1!
+              setTimeout(function () {
+                if (activeCustomerBarcode) setActiveCustomerBarcode('', true);
+                const c1 = document.getElementById('customerBarcodeInput');
+                if (c1) c1.focus();
+              }, 650);
               renderAll(true);
               flushSyncQueue(false);
               if (dupCheck.isDup) {
@@ -6680,7 +6688,16 @@
       custInpEl.addEventListener('keydown', function (e) {
         if (e.key === 'Enter') {
           e.preventDefault();
-          const clean = cleanCustomerBarcode(custInpEl.value);
+          const rawVal = String(custInpEl.value || '').trim();
+          // Nếu đang ở Ô 1 mà bóp cò bắn thẳng tem cân 13 số (bỏ qua tên khách) -> xử lý ghi nhận thẳng vào Ô 2 luôn!
+          const maybeScale = parseSingle13DigitScaleBarcode(rawVal);
+          if (maybeScale && maybeScale.ok) {
+            custInpEl.value = '';
+            setActiveCustomerBarcode('', false);
+            handlePdaBarcodeSubmission(rawVal);
+            return;
+          }
+          const clean = cleanCustomerBarcode(rawVal);
           setActiveCustomerBarcode(clean, true);
           playBeep('ok');
           const pdaProdInp = document.getElementById('pdaProductInput');
@@ -6724,9 +6741,12 @@
             vibrateDevice([40]);
             showBanner('ok', '✅ PDA: ' + (r.customerBarcode ? ('[' + r.customerBarcode + '] ') : '') + (r.productName || ('Mã ' + r.productCode)) + ' — ' + formatKg(r.grams) + ' Kg');
           }
-          if (activeCustomerBarcode) {
-            setTimeout(function () { setActiveCustomerBarcode('', true); }, 650);
-          }
+          // Ghi nhận xong Ô 2 -> xóa trắng Ô 1 & tự động nhảy con trỏ quay lại Ô 1 cho lượt quét tiếp theo!
+          setTimeout(function () {
+            if (activeCustomerBarcode) setActiveCustomerBarcode('', true);
+            const c1 = document.getElementById('customerBarcodeInput');
+            if (c1) c1.focus();
+          }, 650);
         }
       } else {
         // Nếu tia PDA bắn mã không phải tem cân 13 số -> tự nhận là Tên / Mã khách hàng -> điền Ô 1 (xanh ✅) & nhảy sang Ô 2!
