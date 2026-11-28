@@ -2273,3 +2273,38 @@ html, body {
   font-weight: 800;
   margin-left: 4px;
 }
+
+/* ==================== THANH CHỌN 2 CHẾ ĐỘ QUÉT v35 ==================== */
+.scan-mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  background: #e2e8f0;
+  padding: 4px;
+  border-radius: 11px;
+  margin-bottom: 9px;
+}
+
+.scan-mode-pill {
+  border: none;
+  background: transparent;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 8px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.scan-mode-pill.active {
+  background: #0f2942;
+  color: #ffffff;
+  box-shadow: 0 2px 6px rgba(15, 41, 66, 0.22);
+}
+
+.field-done-tick.is-closing {
+  background: #fef3c7;
+  color: #b45309;
+  border-color: #fcd34d;
+}

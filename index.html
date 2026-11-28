@@ -10,7 +10,7 @@
   <link rel="icon" type="image/svg+xml" href="./icon-192.svg">
   <link rel="apple-touch-icon" href="./icon-192.svg">
   <link rel="manifest" href="./manifest.json">
-  <link rel="stylesheet" href="./styles.css?v=34">
+  <link rel="stylesheet" href="./styles.css?v=35">
 </head>
 <body>
 
@@ -21,8 +21,18 @@
 
   <main class="app-container">
 
-    <!-- ==================== MÀN HÌNH SCAN v27: ĐÚNG 2 Ô TRỐNG + NÚT MÁY ẢNH BÊN CẠNH ==================== -->
+    <!-- ==================== MÀN HÌNH SCAN v35: 2 CHẾ ĐỘ (KHÁCH + SP | CHỈ QUÉT SP LIÊN TỤC) ==================== -->
     <div id="scanTopSection">
+
+      <!-- Thanh chọn nhanh 2 chế độ quét siêu gọn -->
+      <div class="scan-mode-switch" role="tablist" aria-label="Chế độ quét">
+        <button type="button" id="btnModeCustomerProd" class="scan-mode-pill active" data-scan-mode="cust_prod">
+          👤 Khách + SP
+        </button>
+        <button type="button" id="btnModeProdOnly" class="scan-mode-pill" data-scan-mode="prod_only">
+          📦 Chỉ quét SP liên tục
+        </button>
+      </div>
 
       <div class="two-box-form">
 
@@ -302,7 +312,7 @@
         <div class="settings-hero-top">
           <div>
             <div class="brand-title">📦 QUÉT TỒN KHO TEM MÃ VẠCH</div>
-            <div class="brand-sub">Bản v34 Xoay Vòng Tự Động Ô 1 ➔ Ô 2 ➔ Ô 1 (Cả Camera &amp; PDA)</div>
+            <div class="brand-sub">Bản v35 Giữ Tên Khách Nhiều SP + Chế Độ Chỉ Quét SP Liên Tục</div>
           </div>
           <button type="button" id="btnOpenSheetModal" class="sync-pill" title="Cài đặt hoặc đồng bộ Google Sheet">
             <span id="syncStatusDot" class="sync-dot"></span>
@@ -511,7 +521,7 @@
   <!-- Bộ giải mã mã vạch 1D siêu tốc nạp cục bộ (đã gỡ bỏ hoàn toàn OCR NSX/HSD cho nhẹ và nhanh tức thì) -->
   <script src="./vendor/zxing_wasm_reader.js?v=20"></script>
   <script src="./catalog.js?v=20"></script>
-  <script src="./apps_script_embed.js?v=34"></script>
-  <script src="./app.js?v=34"></script>
+  <script src="./apps_script_embed.js?v=35"></script>
+  <script src="./app.js?v=35"></script>
 </body>
 </html>
